@@ -4756,6 +4756,9 @@ real, dimension(:,:),         intent(inout)          :: lwdn_sfc, lwup_sfc, swdn
                                                         swup_toa_clr, olr_clr
 !---------------------------------------------------------------------
     tdt_sw = 0.0
+    tdt_lw = 0.0
+    tdt_sw_clr = 0.0
+    tdt_lw_clr = 0.0
 
 
 
