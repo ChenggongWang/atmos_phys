@@ -54,6 +54,8 @@ use fms2_io_mod,             only:  FmsNetcdfFile_t, FmsNetcdfDomainFile_t, &
                                    open_file, read_restart, write_restart, close_file, &
                                    register_field, write_data, get_global_io_domain_indices, &
                                    register_variable_attribute
+use diag_manager_mod,      only: register_diag_field, send_data, &
+                                 diag_manager_init
 use time_manager_mod,      only: time_type, set_date, set_time,  &
                                  get_time,    operator(+),       &
                                  print_date, time_manager_init, &
@@ -344,6 +346,7 @@ logical :: apply_vapor_limits = .true. ! lower limit is applied to
 logical :: nonzero_rad_flux_init = .false.
 
 logical :: do_radiation = .true.
+logical :: do_rad_nn = .true.
 
 logical :: do_conserve_energy = .false.
                                       ! when true, the actually model layer
@@ -470,7 +473,8 @@ namelist /radiation_driver_nml/ do_radiation, &
                                 lat_for_solar_input, lon_for_solar_input, &
                                 rad_time_step, sw_rad_time_step, use_single_lw_sw_ts, &
                                 nonzero_rad_flux_init, &
-                                do_conserve_energy
+                                do_conserve_energy, & 
+                                do_rad_nn
 !---------------------------------------------------------------------
 !---- public data ----
 
@@ -762,7 +766,7 @@ integer :: idtlev, idplay, idtlay, idh2o, ido3, idzlay, idsd, &
            id_nn_swdn_toa, id_nn_swup_toa, id_nn_olr, &
            id_nn_tdt_lw_clr,id_nn_tdt_sw_clr, &
            id_nn_lwdn_sfc_clr, id_nn_swdn_sfc_clr, id_nn_swup_sfc_clr, &
-           id_nn_swup_toa_clr, id_nn_olr_lr 
+           id_nn_swup_toa_clr, id_nn_olr_clr 
 
                          contains
 
@@ -880,6 +884,7 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
       logical :: Rad_restart_exists, Til_restart_exists, Rad_restart_conc_exists, Til_restart_conc_exists
       integer, allocatable, dimension(:) :: pes !< Array of pes in the current pelist
       character(len=32) :: mod_name
+      integer, dimension(4) :: a
 !---------------------------------------------------------------------
 !   local variables
 ! 
@@ -913,6 +918,7 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
       call sat_vapor_pres_init
       call constants_init
       call tracer_manager_init
+      call diag_manager_init
 
 !---------------------------------------------------------------------
 !    read namelist.
@@ -1524,6 +1530,7 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
   idcl = register_diag_field(mod_name, "shallow_liquid_content", a(1:3), time, &
                              "shallow_liquid_content", "")
   idci = register_diag_field(mod_name, "shallow_ice_content", a(1:3), time, &
+                             "shallow_ice_content", "")
 
   id_nn_tdt_lw = register_diag_field(mod_name, "nn_tdt_lw", a(1:3), time,  "nn_tdt_lw", "K/s")
   id_nn_tdt_sw = register_diag_field(mod_name, "nn_tdt_sw", a(1:3), time,  "nn_tdt_sw", "K/s")
@@ -1943,26 +1950,24 @@ real, dimension(:,:,:,:), pointer :: r, rm
 
 ! cgw: local variables for recalculated heating rate and flux from NN module
 
-
 real, dimension(:,:,:), allocatable :: nn_tdt_sw_clr
 real, dimension(:,:,:), allocatable :: nn_tdt_lw_clr
 real, dimension(:,:,:), allocatable :: nn_tdt_sw    
 real, dimension(:,:,:), allocatable :: nn_tdt_lw    
-real, dimension(:,:), allocatable :: nn_lwdn_sfc          
-real, dimension(:,:), allocatable :: nn_lwup_sfc          
-real, dimension(:,:), allocatable :: nn_swdn_sfc          
-real, dimension(:,:), allocatable :: nn_swup_sfc          
-real, dimension(:,:), allocatable :: nn_swdn_toa          
-real, dimension(:,:), allocatable :: nn_swup_toa          
-real, dimension(:,:), allocatable :: nn_olr               
-real, dimension(:,:), allocatable :: id_nn_lwdn_sfc_cl    
-real, dimension(:,:), allocatable :: id_nn_swdn_sfc_cl    
-real, dimension(:,:), allocatable :: id_nn_swup_sfc_cl    
-real, dimension(:,:), allocatable :: id_nn_swup_toa_cl    
-real, dimension(:,:), allocatable :: id_nn_olr_clr        
-
-
-
+real, dimension(:,:),   allocatable :: nn_lwdn_sfc          
+real, dimension(:,:),   allocatable :: nn_lwup_sfc          
+real, dimension(:,:),   allocatable :: nn_swdn_sfc          
+real, dimension(:,:),   allocatable :: nn_swup_sfc          
+real, dimension(:,:),   allocatable :: nn_swdn_toa          
+real, dimension(:,:),   allocatable :: nn_swup_toa          
+real, dimension(:,:),   allocatable :: nn_olr               
+real, dimension(:,:),   allocatable :: nn_lwdn_sfc_clr
+real, dimension(:,:),   allocatable :: nn_swdn_sfc_clr
+real, dimension(:,:),   allocatable :: nn_swup_sfc_clr
+real, dimension(:,:),   allocatable :: nn_swup_toa_clr
+real, dimension(:,:),   allocatable :: nn_olr_clr            
+logical :: flag            
+integer :: n           
 
 !-------------------------------------------------------------------
 !    verify that this module has been initialized. if not, exit.
@@ -2161,30 +2166,30 @@ real, dimension(:,:), allocatable :: id_nn_olr_clr
 
 !   cgw: NN_radiation_calc
     if (do_rad_NN) then
-        allocate(nn_tdt_sw_clr      (size(atmos_input%press, 1), &
-                                     size(atmos_input%press, 2), &
-                                     size(atmos_input%press, 3)))
-        allocate(nn_tdt_lw_clr      (size(atmos_input%press, 1), &
-                                     size(atmos_input%press, 2), &
-                                     size(atmos_input%press, 3)))
-        allocate(nn_tdt_sw          (size(atmos_input%press, 1), &
-                                     size(atmos_input%press, 2), &
-                                     size(atmos_input%press, 3)))
-        allocate(nn_tdt_lw          (size(atmos_input%press, 1), &
-                                     size(atmos_input%press, 2), &
-                                     size(atmos_input%press, 3)))
-        allocate(nn_lwdn_sfc        (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(nn_lwup_sfc        (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(nn_swdn_sfc        (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(nn_swup_sfc        (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(nn_swdn_toa        (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(nn_swup_toa        (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(nn_olr             (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(id_nn_lwdn_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(id_nn_swdn_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(id_nn_swup_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(id_nn_swup_toa_clr (size(atmos_input%press, 1), size(atmos_input%press, 2))
-        allocate(id_nn_olr_clr      (size(atmos_input%press, 1), size(atmos_input%press, 2))
+        allocate(nn_tdt_sw_clr   (size(atmos_input%press, 1), &
+                                  size(atmos_input%press, 2), &
+                                  size(atmos_input%press, 3)))
+        allocate(nn_tdt_lw_clr   (size(atmos_input%press, 1), &
+                                  size(atmos_input%press, 2), &
+                                  size(atmos_input%press, 3)))
+        allocate(nn_tdt_sw       (size(atmos_input%press, 1), &
+                                  size(atmos_input%press, 2), &
+                                  size(atmos_input%press, 3)))
+        allocate(nn_tdt_lw       (size(atmos_input%press, 1), &
+                                  size(atmos_input%press, 2), &
+                                  size(atmos_input%press, 3)))
+        allocate(nn_lwdn_sfc     (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_lwup_sfc     (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swdn_sfc     (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swup_sfc     (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swdn_toa     (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swup_toa     (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_olr          (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_lwdn_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swdn_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swup_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_swup_toa_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        allocate(nn_olr_clr      (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         call NN_radiation_calc (atmos_input%pflux, atmos_input%temp, atmos_input%tflux, atmos_input%tsfc, &
                                 atmos_input%rh2o, rad_gases, astro%cosz, &
                                 surface%asfc_vis_dir, surface%asfc_vis_dif, surface%asfc_nir_dir, surface%asfc_nir_dif, &
@@ -2236,42 +2241,41 @@ real, dimension(:,:), allocatable :: id_nn_olr_clr
         if (ididif .gt. 0) flag = send_data(ididif, surface%asfc_nir_dif, time_next, is, js)
         
         !2D boundary flux
-        if (id_nn_lwdn_sfc .gt. 0) flag = send_data(id_nn_lwdn_sfc, nn_lwdn_sfc, time_next, is, js, 1)
-        if (id_nn_lwup_sfc .gt. 0) flag = send_data(id_nn_lwup_sfc, nn_lwup_sfc, time_next, is, js, 1)
-        if (id_nn_swdn_sfc .gt. 0) flag = send_data(id_nn_swdn_sfc, nn_swdn_sfc, time_next, is, js, 1)
-        if (id_nn_swup_sfc .gt. 0) flag = send_data(id_nn_swup_sfc, nn_swup_sfc, time_next, is, js, 1)
-        if (id_nn_swdn_toa .gt. 0) flag = send_data(id_nn_swdn_toa, nn_swdn_toa, time_next, is, js, 1)
-        if (id_nn_swup_toa .gt. 0) flag = send_data(id_nn_swup_toa, nn_swup_toa, time_next, is, js, 1)
-        if (id_nn_olr      .gt. 0) flag = send_data(id_nn_olr     , nn_olr     , time_next, is, js, 1)
+        if (id_nn_lwdn_sfc .gt. 0) flag = send_data(id_nn_lwdn_sfc, nn_lwdn_sfc, time_next, is, js)
+        if (id_nn_lwup_sfc .gt. 0) flag = send_data(id_nn_lwup_sfc, nn_lwup_sfc, time_next, is, js)
+        if (id_nn_swdn_sfc .gt. 0) flag = send_data(id_nn_swdn_sfc, nn_swdn_sfc, time_next, is, js)
+        if (id_nn_swup_sfc .gt. 0) flag = send_data(id_nn_swup_sfc, nn_swup_sfc, time_next, is, js)
+        if (id_nn_swdn_toa .gt. 0) flag = send_data(id_nn_swdn_toa, nn_swdn_toa, time_next, is, js)
+        if (id_nn_swup_toa .gt. 0) flag = send_data(id_nn_swup_toa, nn_swup_toa, time_next, is, js)
+        if (id_nn_olr      .gt. 0) flag = send_data(id_nn_olr     , nn_olr     , time_next, is, js)
         
-        if (id_nn_lwdn_sfc_clr .gt. 0) flag = send_data(id_nn_lwdn_sfc_clr, nn_lwdn_sfc_clr, time_next, is, js, 1)
-        if (id_nn_swdn_sfc_clr .gt. 0) flag = send_data(id_nn_swdn_sfc_clr, nn_swdn_sfc_clr, time_next, is, js, 1)
-        if (id_nn_swup_sfc_clr .gt. 0) flag = send_data(id_nn_swup_sfc_clr, nn_swup_sfc_clr, time_next, is, js, 1)
-        if (id_nn_swup_toa_clr .gt. 0) flag = send_data(id_nn_swup_toa_clr, nn_swup_toa_clr, time_next, is, js, 1)
-        if (id_nn_olr_clr      .gt. 0) flag = send_data(id_nn_olr_clr     , nn_olr_clr     , time_next, is, js, 1)
+        if (id_nn_lwdn_sfc_clr .gt. 0) flag = send_data(id_nn_lwdn_sfc_clr, nn_lwdn_sfc_clr, time_next, is, js)
+        if (id_nn_swdn_sfc_clr .gt. 0) flag = send_data(id_nn_swdn_sfc_clr, nn_swdn_sfc_clr, time_next, is, js)
+        if (id_nn_swup_sfc_clr .gt. 0) flag = send_data(id_nn_swup_sfc_clr, nn_swup_sfc_clr, time_next, is, js)
+        if (id_nn_swup_toa_clr .gt. 0) flag = send_data(id_nn_swup_toa_clr, nn_swup_toa_clr, time_next, is, js)
+        if (id_nn_olr_clr      .gt. 0) flag = send_data(id_nn_olr_clr     , nn_olr_clr     , time_next, is, js)
         
         !1D
         if (ider .gt. 0) flag = send_data(ider, astro%rrsun, time_next)
-        if (idsolar .gt. 0) flag = send_data(idsolar, rte%solar_constant%flux, time_next)
 
 
         ! deallocate NN resluts
-        if (allocated(nn_tdt_sw_clr    )) deallocate(nn_tdt_sw_clr    )
-        if (allocated(nn_tdt_lw_clr    )) deallocate(nn_tdt_lw_clr    )
-        if (allocated(nn_tdt_sw        )) deallocate(nn_tdt_sw        )
-        if (allocated(nn_tdt_lw        )) deallocate(nn_tdt_lw        )
-        if (allocated(nn_lwdn_sfc      )) deallocate(nn_lwdn_sfc      )
-        if (allocated(nn_lwup_sfc      )) deallocate(nn_lwup_sfc      )
-        if (allocated(nn_swdn_sfc      )) deallocate(nn_swdn_sfc      )
-        if (allocated(nn_swup_sfc      )) deallocate(nn_swup_sfc      )
-        if (allocated(nn_swdn_toa      )) deallocate(nn_swdn_toa      )
-        if (allocated(nn_swup_toa      )) deallocate(nn_swup_toa      )
-        if (allocated(nn_olr           )) deallocate(nn_olr           )
-        if (allocated(id_nn_lwdn_sfc_cl)) deallocate(id_nn_lwdn_sfc_cl)
-        if (allocated(id_nn_swdn_sfc_cl)) deallocate(id_nn_swdn_sfc_cl)
-        if (allocated(id_nn_swup_sfc_cl)) deallocate(id_nn_swup_sfc_cl)
-        if (allocated(id_nn_swup_toa_cl)) deallocate(id_nn_swup_toa_cl)
-        if (allocated(id_nn_olr_clr    )) deallocate(id_nn_olr_clr    )
+        if (allocated(nn_tdt_sw      )) deallocate(nn_tdt_sw      )
+        if (allocated(nn_tdt_lw      )) deallocate(nn_tdt_lw      )
+        if (allocated(nn_tdt_sw_clr  )) deallocate(nn_tdt_sw_clr  )
+        if (allocated(nn_tdt_lw_clr  )) deallocate(nn_tdt_lw_clr  )
+        if (allocated(nn_lwdn_sfc    )) deallocate(nn_lwdn_sfc    )
+        if (allocated(nn_lwup_sfc    )) deallocate(nn_lwup_sfc    )
+        if (allocated(nn_swdn_sfc    )) deallocate(nn_swdn_sfc    )
+        if (allocated(nn_swup_sfc    )) deallocate(nn_swup_sfc    )
+        if (allocated(nn_swdn_toa    )) deallocate(nn_swdn_toa    )
+        if (allocated(nn_swup_toa    )) deallocate(nn_swup_toa    )
+        if (allocated(nn_olr         )) deallocate(nn_olr         )
+        if (allocated(nn_lwdn_sfc_clr)) deallocate(nn_lwdn_sfc_clr)
+        if (allocated(nn_swdn_sfc_clr)) deallocate(nn_swdn_sfc_clr)
+        if (allocated(nn_swup_sfc_clr)) deallocate(nn_swup_sfc_clr)
+        if (allocated(nn_swup_toa_clr)) deallocate(nn_swup_toa_clr)
+        if (allocated(nn_olr_clr     )) deallocate(nn_olr_clr     )
      endif
 
 
@@ -4722,7 +4726,7 @@ end subroutine radiation_calc
 !      only consider ozone and cloud, no aerosol and other GHGs for now
 !
 !
-subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz &
+subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, &
                               asfc_vis_dir, asfc_nir_dir, asfc_vis_dif, asfc_nir_dif, &
                               moist_clouds_block, &
                               tdt_sw, tdt_lw, &
@@ -4735,7 +4739,7 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz &
 
 !--------------------------------------------------------------------
 real, dimension(:,:,:),       intent(in)             :: pflux, temp, &
-                                                        tflux, rh2o, deltaz
+                                                        tflux, rh2o
 real, dimension(:,:),         intent(in)             :: tsfc
 type(radiative_gases_type),   intent(in)             :: Rad_gases
 real, dimension(:,:),         intent(in)             :: cosz
