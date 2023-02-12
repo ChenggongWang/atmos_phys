@@ -53,7 +53,8 @@ use fms2_io_mod,             only:  FmsNetcdfFile_t, FmsNetcdfDomainFile_t, &
                                    register_restart_field, register_axis, unlimited, &
                                    open_file, read_restart, write_restart, close_file, &
                                    register_field, write_data, get_global_io_domain_indices, &
-                                   register_variable_attribute
+                                   register_variable_attribute, &
+                                   read_data
 use diag_manager_mod,      only: register_diag_field, send_data, &
                                  diag_manager_init
 use time_manager_mod,      only: time_type, set_date, set_time,  &
@@ -192,7 +193,6 @@ private
 character(len=128) :: version = '$Id$'
 character(len=128) :: tagname = '$Name$'
 
-
 !---------------------------------------------------------------------
 !------ interfaces -----
 ! <PUBLIC>
@@ -242,7 +242,6 @@ private  &
 
 ! called from define_atmos_input_fields:
           calculate_auxiliary_variables
-
 
 !-----------------------------------------------------------------------
 !------- namelist ---------
@@ -347,6 +346,7 @@ logical :: nonzero_rad_flux_init = .false.
 
 logical :: do_radiation = .true.
 logical :: do_rad_nn = .true.
+character(len=100) :: rad_nn_para_nc='INPUT/RadNN_AM4_para_default.nc'
 
 logical :: do_conserve_energy = .false.
                                       ! when true, the actually model layer
@@ -474,7 +474,8 @@ namelist /radiation_driver_nml/ do_radiation, &
                                 rad_time_step, sw_rad_time_step, use_single_lw_sw_ts, &
                                 nonzero_rad_flux_init, &
                                 do_conserve_energy, & 
-                                do_rad_nn
+                                do_rad_nn, &
+                                rad_nn_para_nc
 !---------------------------------------------------------------------
 !---- public data ----
 
@@ -535,6 +536,20 @@ end type radiation_diag_type
 !     cldsct      cloud scattering coefficient [ dimensionless ]
 !     cldsasymm   cloud asymmetry factor  [ dimensionless ]
 
+
+!----------------------------------------------------------------------
+! cgw
+! define type for linear layer
+! contains weight(2d) and bias(1d)
+!----------------------------------------------------------------------
+
+public NN_Linear_layer_type
+type :: NN_Linear_layer_type
+    integer :: num_hid_nodes
+    integer :: num_layers
+    real, dimension(:,:), pointer :: weight=>NULL()
+    real, dimension(:),   pointer :: bias=>NULL()
+end type NN_Linear_layer_type
 !---------------------------------------------------------------------
 !---- private data ----
 !-- for netcdf restart
@@ -755,8 +770,9 @@ type (domain2D)               :: radiation_domain !< Atmosphere domain
 !     longwave and shortwave documentation.</REFERENCE>
 !---------------------------------------------------------------------
 
+! cgw: for NN_para
+type(NN_Linear_layer_type), allocatable, dimension(:)  :: Rad_NN_Layers
 ! cgw: for NN_diag
-
 integer :: idtlev, idplay, idtlay, idh2o, ido3, idzlay, idsd, &
            idsf, idsl, idsi, idcd, idcf, idcl, idci, &
            idps, idts, idzen, &
@@ -884,6 +900,10 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
       logical :: Rad_restart_exists, Til_restart_exists, Rad_restart_conc_exists, Til_restart_conc_exists
       integer, allocatable, dimension(:) :: pes !< Array of pes in the current pelist
       character(len=32) :: mod_name
+      character(len=32) :: fmt_str
+      type(FmsNetcdfFile_t)       :: Rad_NN_para_fileobj        !< Fms2_io fileobj
+      integer :: nn_size0, nn_size1
+      integer :: nn_num_layers, ilayer
       integer, dimension(4) :: a
 !---------------------------------------------------------------------
 !   local variables
@@ -1496,82 +1516,120 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
 !--------------------------------------------------------------------
 
 !---------------------------------------------------------------------
-!    cgw: section to register variale to diagnose the results from NN
+!    cgw: section to 
+!         initialize NN module 
+!         register variale to diagnose the results from NN
 !---------------------------------------------------------------------
+    if (do_rad_nn) then
+        outunit = stdout()
+        ! read para file  
+        call error_mesg ('radiation_driver_mod',  &
+                 'Initializing the rad_nn module', NOTE)
+        call error_mesg ('radiation_driver_mod',  &
+                 'Reading NetCDF file to obtain NN parameters. INPUT/'//trim(rad_nn_para_nc), NOTE)
+        if (open_file(Rad_NN_para_fileobj, "INPUT/"//trim(rad_nn_para_nc), "read" )) then
+            ! read num of NN layers
+            call read_data(Rad_NN_para_fileobj, 'LN', nn_num_layers)
+            allocate(Rad_NN_Layers(nn_num_layers))
+            Rad_NN_Layers%num_layers = nn_num_layers
+            ! read weight and bias for each layer
+            do ilayer = 1, nn_num_layers 
+                ! read size of each layer
+                write (fmt_str, "(A4,I1,I1)") "size", ilayer, 0
+                call read_data(Rad_NN_para_fileobj, fmt_str, nn_size0)
+                write (fmt_str, "(A4,I1,I1)") "size", ilayer, 1
+                call read_data(Rad_NN_para_fileobj, fmt_str, nn_size1)
+                allocate(Rad_NN_Layers(ilayer)%weight(nn_size1,nn_size0)) !fortran reverse order
+                allocate(Rad_NN_Layers(ilayer)%bias(nn_size0))
+                write(outunit,*) 'nn_size', nn_size0, nn_size1
+                write (fmt_str, "(A1,I1)") "W", ilayer
+                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_Layers(ilayer)%weight(:,:))
+                write (fmt_str, "(A1,I1)") "B", ilayer
+                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_Layers(ilayer)%bias(:))
+                ! for diagnose purpose
+                write(outunit,*) Rad_NN_Layers(ilayer)%bias 
+            end do 
+            Rad_NN_Layers%num_hid_nodes = nn_size1
+            call close_file(Rad_NN_para_fileobj)
+        else
+            call error_mesg ('radiation_driver_mod',  &
+                 'rad_nn_para_nc file open failed. INPUT/'//trim(rad_nn_para_nc), FATAL)
+        endif
 
-  mod_name = "NN_diag"
-  outunit = stdout()
-  write(outunit,*) 'register NN_diag ', mod_name
-  a(1:2) = axes(1:2)
-  a(3) = axes(4)
-  !3D atmosphere fields.
-  ! phalf
-  idtlev = register_diag_field(mod_name, "level_temperature", a(1:3), time, &
-                               "level temperature", "K")
+        ! diag
+        mod_name = "NN_diag"
+        write(outunit,*) 'register output mod: ', mod_name
+        a(1:2) = axes(1:2)
+        a(3) = axes(4)
+        !3D atmosphere fields.
+        ! phalf
+        idtlev = register_diag_field(mod_name, "level_temperature", a(1:3), time, &
+                                     "level temperature", "K")
 
-  ! pfull
-  a(3) = axes(3)
-  idtlay = register_diag_field(mod_name, "layer_temperature", a(1:3), time, &
-                               "layer temperature", "Pa")
-  idzlay = register_diag_field(mod_name, "layer_thickness", a(1:3), time, &
-                               "layer_thickness", "m")
-  idsd = register_diag_field(mod_name, "stratiform_droplet_number", a(1:3), time, &
-                             "stratiform_droplet_number", "")
-  idsf = register_diag_field(mod_name, "stratiform_cloud_fraction", a(1:3), time, &
-                             "stratiform_cloud_fraction", "none")
-  idsl = register_diag_field(mod_name, "stratiform_liquid_content", a(1:3), time, &
-                             "stratiform_liquid_content", "")
-  idsi = register_diag_field(mod_name, "stratiform_ice_content", a(1:3), time, &
-                             "stratiform_ice_content", "")
-  idcd = register_diag_field(mod_name, "shallow_droplet_number", a(1:3), time, &
-                             "shallow_droplet_number", "")
-  idcf = register_diag_field(mod_name, "shallow_cloud_fraction", a(1:3), time, &
-                             "shallow_cloud_fraction", "none")
-  idcl = register_diag_field(mod_name, "shallow_liquid_content", a(1:3), time, &
-                             "shallow_liquid_content", "")
-  idci = register_diag_field(mod_name, "shallow_ice_content", a(1:3), time, &
-                             "shallow_ice_content", "")
+        ! pfull
+        a(3) = axes(3)
+        idtlay = register_diag_field(mod_name, "layer_temperature", a(1:3), time, &
+                                     "layer temperature", "Pa")
+        idzlay = register_diag_field(mod_name, "layer_thickness", a(1:3), time, &
+                                     "layer_thickness", "m")
+        idsd = register_diag_field(mod_name, "stratiform_droplet_number", a(1:3), time, &
+                                   "stratiform_droplet_number", "")
+        idsf = register_diag_field(mod_name, "stratiform_cloud_fraction", a(1:3), time, &
+                                   "stratiform_cloud_fraction", "none")
+        idsl = register_diag_field(mod_name, "stratiform_liquid_content", a(1:3), time, &
+                                   "stratiform_liquid_content", "")
+        idsi = register_diag_field(mod_name, "stratiform_ice_content", a(1:3), time, &
+                                   "stratiform_ice_content", "")
+        idcd = register_diag_field(mod_name, "shallow_droplet_number", a(1:3), time, &
+                                   "shallow_droplet_number", "")
+        idcf = register_diag_field(mod_name, "shallow_cloud_fraction", a(1:3), time, &
+                                   "shallow_cloud_fraction", "none")
+        idcl = register_diag_field(mod_name, "shallow_liquid_content", a(1:3), time, &
+                                   "shallow_liquid_content", "")
+        idci = register_diag_field(mod_name, "shallow_ice_content", a(1:3), time, &
+                                   "shallow_ice_content", "")
 
-  id_nn_tdt_lw = register_diag_field(mod_name, "nn_tdt_lw", a(1:3), time,  "nn_tdt_lw", "K/s")
-  id_nn_tdt_sw = register_diag_field(mod_name, "nn_tdt_sw", a(1:3), time,  "nn_tdt_sw", "K/s")
-  id_nn_tdt_lw_clr = register_diag_field(mod_name, "nn_tdt_lw_clr", a(1:3), time,  "nn_tdt_lw_clr", "K/s")
-  id_nn_tdt_sw_clr = register_diag_field(mod_name, "nn_tdt_sw_clr", a(1:3), time,  "nn_tdt_sw_clr", "K/s")
+        id_nn_tdt_lw = register_diag_field(mod_name, "nn_tdt_lw", a(1:3), time,  "nn_tdt_lw", "K/s")
+        id_nn_tdt_sw = register_diag_field(mod_name, "nn_tdt_sw", a(1:3), time,  "nn_tdt_sw", "K/s")
+        id_nn_tdt_lw_clr = register_diag_field(mod_name, "nn_tdt_lw_clr", a(1:3), time,  "nn_tdt_lw_clr", "K/s")
+        id_nn_tdt_sw_clr = register_diag_field(mod_name, "nn_tdt_sw_clr", a(1:3), time,  "nn_tdt_sw_clr", "K/s")
 
-  !2D fields (non-vertical)
-  idps = register_diag_field(mod_name, "ps", a(1:2), time, &
-                               "surface pressure", "Pa")
-  idts = register_diag_field(mod_name, "surface_temperature", a(1:2), time, &
-                             "surface temperature", "K")
-  idzen = register_diag_field(mod_name, "cosine_zenith", a(1:2), time, &
-                              "cosine_zenith", "none")
-  idvdir = register_diag_field(mod_name, "visible_direct_albedo", a(1:2), time, &
-                               "visible_direct_albedo", "none")
-  idvdif = register_diag_field(mod_name, "visible_diffuse_albedo", a(1:2), time, &
-                               "visible_diffuse_albedo", "none")
-  ididir = register_diag_field(mod_name, "infrared_direct_albedo", a(1:2), time, &
-                               "infrared_direct_albedo", "none")
-  ididif = register_diag_field(mod_name, "infrared_diffuse_albedo", a(1:2), time, &
-                               "infrared_diffuse_albedo", "none")
+        !2D fields (non-vertical)
+        idps = register_diag_field(mod_name, "ps", a(1:2), time, &
+                                     "surface pressure", "Pa")
+        idts = register_diag_field(mod_name, "surface_temperature", a(1:2), time, &
+                                   "surface temperature", "K")
+        idzen = register_diag_field(mod_name, "cosine_zenith", a(1:2), time, &
+                                    "cosine_zenith", "none")
+        idvdir = register_diag_field(mod_name, "visible_direct_albedo", a(1:2), time, &
+                                     "visible_direct_albedo", "none")
+        idvdif = register_diag_field(mod_name, "visible_diffuse_albedo", a(1:2), time, &
+                                     "visible_diffuse_albedo", "none")
+        ididir = register_diag_field(mod_name, "infrared_direct_albedo", a(1:2), time, &
+                                     "infrared_direct_albedo", "none")
+        ididif = register_diag_field(mod_name, "infrared_diffuse_albedo", a(1:2), time, &
+                                     "infrared_diffuse_albedo", "none")
 
-  id_nn_lwdn_sfc = register_diag_field(mod_name, "nn_lwdn_sfc", a(1:2), time,  "nn_lwdn_sfc", "Wm-2")
-  id_nn_lwup_sfc = register_diag_field(mod_name, "nn_lwup_sfc", a(1:2), time,  "nn_lwup_sfc", "Wm-2")
-  id_nn_swdn_sfc = register_diag_field(mod_name, "nn_swdn_sfc", a(1:2), time,  "nn_swdn_sfc", "Wm-2")
-  id_nn_swup_sfc = register_diag_field(mod_name, "nn_swup_sfc", a(1:2), time,  "nn_swup_sfc", "Wm-2")
-  id_nn_swdn_toa = register_diag_field(mod_name, "nn_swdn_toa", a(1:2), time,  "nn_swdn_toa", "Wm-2")
-  id_nn_swup_toa = register_diag_field(mod_name, "nn_swup_toa", a(1:2), time,  "nn_swup_toa", "Wm-2")
-  id_nn_olr      = register_diag_field(mod_name, "nn_olr", a(1:2), time,  "nn_olr", "Wm-2")
-  id_nn_lwdn_sfc_clr = register_diag_field(mod_name, "nn_lwdn_sfc_clr", a(1:2), time,  "nn_lwdn_sfc_clr", "Wm-2")
-  id_nn_swdn_sfc_clr = register_diag_field(mod_name, "nn_swdn_sfc_clr", a(1:2), time,  "nn_swdn_sfc_clr", "Wm-2")
-  id_nn_swup_sfc_clr = register_diag_field(mod_name, "nn_swup_sfc_clr", a(1:2), time,  "nn_swup_sfc_clr", "Wm-2")
-  id_nn_swup_toa_clr = register_diag_field(mod_name, "nn_swup_toa_clr", a(1:2), time,  "nn_swup_toa_clr", "Wm-2")
-  id_nn_olr_clr      = register_diag_field(mod_name, "nn_olr_clr", a(1:2), time,  "nn_olr_clr", "Wm-2")
+        id_nn_lwdn_sfc = register_diag_field(mod_name, "nn_lwdn_sfc", a(1:2), time,  "nn_lwdn_sfc", "Wm-2")
+        id_nn_lwup_sfc = register_diag_field(mod_name, "nn_lwup_sfc", a(1:2), time,  "nn_lwup_sfc", "Wm-2")
+        id_nn_swdn_sfc = register_diag_field(mod_name, "nn_swdn_sfc", a(1:2), time,  "nn_swdn_sfc", "Wm-2")
+        id_nn_swup_sfc = register_diag_field(mod_name, "nn_swup_sfc", a(1:2), time,  "nn_swup_sfc", "Wm-2")
+        id_nn_swdn_toa = register_diag_field(mod_name, "nn_swdn_toa", a(1:2), time,  "nn_swdn_toa", "Wm-2")
+        id_nn_swup_toa = register_diag_field(mod_name, "nn_swup_toa", a(1:2), time,  "nn_swup_toa", "Wm-2")
+        id_nn_olr      = register_diag_field(mod_name, "nn_olr", a(1:2), time,  "nn_olr", "Wm-2")
+        id_nn_lwdn_sfc_clr = register_diag_field(mod_name, "nn_lwdn_sfc_clr", a(1:2), time,  "nn_lwdn_sfc_clr", "Wm-2")
+        id_nn_swdn_sfc_clr = register_diag_field(mod_name, "nn_swdn_sfc_clr", a(1:2), time,  "nn_swdn_sfc_clr", "Wm-2")
+        id_nn_swup_sfc_clr = register_diag_field(mod_name, "nn_swup_sfc_clr", a(1:2), time,  "nn_swup_sfc_clr", "Wm-2")
+        id_nn_swup_toa_clr = register_diag_field(mod_name, "nn_swup_toa_clr", a(1:2), time,  "nn_swup_toa_clr", "Wm-2")
+        id_nn_olr_clr      = register_diag_field(mod_name, "nn_olr_clr", a(1:2), time,  "nn_olr_clr", "Wm-2")
 
-  !1D 
+        !1D 
 
-  ider = register_diag_field(mod_name, "earth_sun_distance_fraction", time, &
-                             "earth_sun_distance_fraction", "none")
-  idsolar = register_diag_field(mod_name, "solar_constant", time, &
-                                "solar_constant", "none")
+        ider = register_diag_field(mod_name, "earth_sun_distance_fraction", time, &
+                                   "earth_sun_distance_fraction", "none")
+        idsolar = register_diag_field(mod_name, "solar_constant", time, &
+                                      "solar_constant", "none")
+    endif ! do_rad_nn
 
 end subroutine radiation_driver_init
 
@@ -2276,7 +2334,7 @@ integer :: n
         if (allocated(nn_swup_sfc_clr)) deallocate(nn_swup_sfc_clr)
         if (allocated(nn_swup_toa_clr)) deallocate(nn_swup_toa_clr)
         if (allocated(nn_olr_clr     )) deallocate(nn_olr_clr     )
-     endif
+    endif ! do_rad_nn
 
 
 
