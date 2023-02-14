@@ -542,14 +542,18 @@ end type radiation_diag_type
 ! define type for linear layer
 ! contains weight(2d) and bias(1d)
 !----------------------------------------------------------------------
-
 public NN_Linear_layer_type
-type :: NN_Linear_layer_type
-    integer :: num_hid_nodes
-    integer :: num_layers
+type :: NN_Linear_layer_type 
     real, dimension(:,:), pointer :: weight=>NULL()
     real, dimension(:),   pointer :: bias=>NULL()
 end type NN_Linear_layer_type
+public NN_FC_type
+type :: NN_FC_type
+    integer :: num_hid_nodes
+    integer :: num_layers
+    type(NN_Linear_layer_type), dimension(:), pointer:: Layers
+end type NN_FC_type
+
 !---------------------------------------------------------------------
 !---- private data ----
 !-- for netcdf restart
@@ -771,7 +775,8 @@ type (domain2D)               :: radiation_domain !< Atmosphere domain
 !---------------------------------------------------------------------
 
 ! cgw: for NN_para
-type(NN_Linear_layer_type), allocatable, dimension(:)  :: Rad_NN_Layers
+!type(NN_Linear_layer_type), allocatable, dimension(:)  :: Rad_NN_Layers
+type(NN_FC_type)   :: Rad_NN_FC
 ! cgw: for NN_diag
 integer :: idtlev, idplay, idtlay, idh2o, ido3, idzlay, idsd, &
            idsf, idsl, idsi, idcd, idcf, idcl, idci, &
@@ -1530,8 +1535,9 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
         if (open_file(Rad_NN_para_fileobj, "INPUT/"//trim(rad_nn_para_nc), "read" )) then
             ! read num of NN layers
             call read_data(Rad_NN_para_fileobj, 'LN', nn_num_layers)
-            allocate(Rad_NN_Layers(nn_num_layers))
-            Rad_NN_Layers%num_layers = nn_num_layers
+
+            Rad_NN_FC%num_layers = nn_num_layers
+            allocate(Rad_NN_FC%Layers(Rad_NN_FC%num_layers))
             ! read weight and bias for each layer
             do ilayer = 1, nn_num_layers 
                 ! read size of each layer
@@ -1539,17 +1545,17 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
                 call read_data(Rad_NN_para_fileobj, fmt_str, nn_size0)
                 write (fmt_str, "(A4,I1,I1)") "size", ilayer, 1
                 call read_data(Rad_NN_para_fileobj, fmt_str, nn_size1)
-                allocate(Rad_NN_Layers(ilayer)%weight(nn_size1,nn_size0)) !fortran reverse order
-                allocate(Rad_NN_Layers(ilayer)%bias(nn_size0))
+                allocate(Rad_NN_FC%Layers(ilayer)%weight(nn_size1,nn_size0)) !fortran reverse order
+                allocate(Rad_NN_FC%Layers(ilayer)%bias(nn_size0))
                 write(outunit,*) 'nn_size', nn_size0, nn_size1
                 write (fmt_str, "(A1,I1)") "W", ilayer
-                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_Layers(ilayer)%weight(:,:))
+                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_FC%Layers(ilayer)%weight(:,:))
                 write (fmt_str, "(A1,I1)") "B", ilayer
-                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_Layers(ilayer)%bias(:))
+                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_FC%Layers(ilayer)%bias(:))
                 ! for diagnose purpose
-                write(outunit,*) Rad_NN_Layers(ilayer)%bias 
+                write(outunit,*) Rad_NN_FC%Layers(ilayer)%bias 
             end do 
-            Rad_NN_Layers%num_hid_nodes = nn_size1
+            Rad_NN_FC%num_hid_nodes = nn_size1
             call close_file(Rad_NN_para_fileobj)
         else
             call error_mesg ('radiation_driver_mod',  &
@@ -1563,13 +1569,13 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
         a(3) = axes(4)
         !3D atmosphere fields.
         ! phalf
-        idtlev = register_diag_field(mod_name, "level_temperature", a(1:3), time, &
+        idtlev = register_diag_field(mod_name, "tflux", a(1:3), time, &
                                      "level temperature", "K")
 
         ! pfull
         a(3) = axes(3)
-        idtlay = register_diag_field(mod_name, "layer_temperature", a(1:3), time, &
-                                     "layer temperature", "Pa")
+        idtlay = register_diag_field(mod_name, "ta", a(1:3), time, &
+                                     "layer temperature", "K")
         idzlay = register_diag_field(mod_name, "layer_thickness", a(1:3), time, &
                                      "layer_thickness", "m")
         idsd = register_diag_field(mod_name, "stratiform_droplet_number", a(1:3), time, &
@@ -1597,7 +1603,7 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
         !2D fields (non-vertical)
         idps = register_diag_field(mod_name, "ps", a(1:2), time, &
                                      "surface pressure", "Pa")
-        idts = register_diag_field(mod_name, "surface_temperature", a(1:2), time, &
+        idts = register_diag_field(mod_name, "ts", a(1:2), time, &
                                    "surface temperature", "K")
         idzen = register_diag_field(mod_name, "cosine_zenith", a(1:2), time, &
                                     "cosine_zenith", "none")
@@ -2025,7 +2031,8 @@ real, dimension(:,:),   allocatable :: nn_swup_sfc_clr
 real, dimension(:,:),   allocatable :: nn_swup_toa_clr
 real, dimension(:,:),   allocatable :: nn_olr_clr            
 logical :: flag            
-integer :: n           
+integer :: n 
+integer :: irepeat 
 
 !-------------------------------------------------------------------
 !    verify that this module has been initialized. if not, exit.
@@ -2222,7 +2229,7 @@ integer :: n
       endif
       call mpp_clock_end (calc_clock)
 
-!   cgw: NN_radiation_calc
+!   cgw: call NN_radiation_calc 
     if (do_rad_NN) then
         allocate(nn_tdt_sw_clr   (size(atmos_input%press, 1), &
                                   size(atmos_input%press, 2), &
@@ -2248,6 +2255,7 @@ integer :: n
         allocate(nn_swup_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         allocate(nn_swup_toa_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         allocate(nn_olr_clr      (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        do irepeat = 1,4
         call NN_radiation_calc (atmos_input%pflux, atmos_input%temp, atmos_input%tflux, atmos_input%tsfc, &
                                 atmos_input%rh2o, rad_gases, astro%cosz, &
                                 surface%asfc_vis_dir, surface%asfc_vis_dif, surface%asfc_nir_dir, surface%asfc_nir_dif, &
@@ -2258,6 +2266,7 @@ integer :: n
                                 nn_tdt_sw_clr, nn_tdt_lw_clr, &
                                 nn_lwdn_sfc_clr, nn_swdn_sfc_clr, nn_swup_sfc_clr, &
                                 nn_swup_toa_clr, nn_olr_clr ) 
+        end do 
      ! send_data to diag files
         !3D atmosphere fields.
         if (idtlev .gt. 0) flag = send_data(idtlev, atmos_input%tflux, time_next, is, js, 1)
@@ -2291,6 +2300,7 @@ integer :: n
         if (id_nn_tdt_lw_clr .gt. 0) flag = send_data(id_nn_tdt_lw_clr, nn_tdt_lw_clr, time_next, is, js, 1)
         if (id_nn_tdt_sw_clr .gt. 0) flag = send_data(id_nn_tdt_sw_clr, nn_tdt_sw_clr, time_next, is, js, 1)
         !2D atmosphere fields.
+        if (idps .gt. 0) flag = send_data(idps, atmos_input%psfc, time_next, is, js)
         if (idts .gt. 0) flag = send_data(idts, atmos_input%tsfc, time_next, is, js)
         if (idzen .gt. 0) flag = send_data(idzen, astro%cosz, time_next, is, js)
         if (idvdir .gt. 0) flag = send_data(idvdir, surface%asfc_vis_dir, time_next, is, js)
@@ -4779,6 +4789,58 @@ type(lw_diagnostics_type),          intent(inout)    :: Lw_diagnostics
 
 end subroutine radiation_calc
 
+
+!######################################################################
+! cgw: function and subroutine for an NN to predict
+! NN activation function
+real elemental function NN_activ(x)
+    real, intent(in) :: x
+    ! ReLU:
+    if (x>0) then
+        NN_activ = x
+    else
+        NN_activ = 0
+    end if
+    ! tanh
+    ! y = tanh(x)
+end function NN_activ
+! FNN for one column 
+subroutine Rad_NN_pred_1d(model, input_X, output_Y)
+! a specific implement for Li5ReluBN
+    type(NN_FC_type),    intent(in)     :: model
+    real,  dimension(:), intent(in)     :: input_X
+    real,  dimension(:), intent(inout)  :: output_Y
+    ! first 4 Linear>Relu>BN
+    ! local variables
+    real, allocatable, dimension(:)    :: interm_X
+    integer :: ilayer, k 
+
+    ! interm_size = Rad_NN_FC%num_hid_nodes
+    ! num_layers  = Rad_NN_FC%num_layers
+
+    allocate(interm_X(model%num_hid_nodes))
+
+    do ilayer = 1, model%num_layers-1
+        ! y = x*w+b
+        if (ilayer == 1) then
+            interm_X = matmul (input_X , model%Layers(ilayer)%weight)  + model%Layers(ilayer)%bias
+        else                                                       
+            interm_X = matmul (interm_X, model%Layers(ilayer)%weight) + model%Layers(ilayer)%bias
+        end if
+        ! y = sigma(y) apply activation function for all nodes
+        interm_X = NN_activ(interm_X)
+    end do
+    output_Y = matmul (interm_X, model%Layers(ilayer)%weight) + model%Layers(ilayer)%bias
+    ! limiter
+    do k = 1, size(output_Y)
+        if (output_Y(k)>1E4) then
+            output_Y(k) = 1E4
+        else if (output_Y(k)<-1E4) then
+            output_Y(k) =-1E4
+        end if
+    end do
+end subroutine Rad_NN_pred_1d
+
 !######################################################################
 ! cgw: subroutine to apply NN 
 !      only consider ozone and cloud, no aerosol and other GHGs for now
@@ -4795,31 +4857,61 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
                               swup_toa_clr, olr_clr ) 
 
 
-!--------------------------------------------------------------------
-real, dimension(:,:,:),       intent(in)             :: pflux, temp, &
-                                                        tflux, rh2o
-real, dimension(:,:),         intent(in)             :: tsfc
-type(radiative_gases_type),   intent(in)             :: Rad_gases
-real, dimension(:,:),         intent(in)             :: cosz
-real, dimension(:,:),         intent(in)             :: asfc_vis_dir, &
-                                                        asfc_nir_dir, &
-                                                        asfc_vis_dif, &
-                                                        asfc_nir_dif
-type(clouds_from_moist_block_type), intent(in)       :: Moist_clouds_block
-! swdn_toa is input
-real, dimension(:,:,:),       intent(inout)          :: tdt_sw, tdt_lw, tdt_sw_clr, tdt_lw_clr
-real, dimension(:,:),         intent(inout)          :: lwdn_sfc, lwup_sfc, swdn_sfc, swup_sfc,  &
-                                                        swdn_toa, swup_toa, olr, & 
-                                                        lwdn_sfc_clr, swdn_sfc_clr, swup_sfc_clr, &
-                                                        swup_toa_clr, olr_clr
-!---------------------------------------------------------------------
+    !--------------------------------------------------------------------
+    real, dimension(:,:,:),       intent(in)             :: pflux, temp, &
+                                                            tflux, rh2o
+    real, dimension(:,:),         intent(in)             :: tsfc
+    type(radiative_gases_type),   intent(in)             :: Rad_gases
+    real, dimension(:,:),         intent(in)             :: cosz
+    real, dimension(:,:),         intent(in)             :: asfc_vis_dir, &
+                                                            asfc_nir_dir, &
+                                                            asfc_vis_dif, &
+                                                            asfc_nir_dif
+    type(clouds_from_moist_block_type), intent(in)       :: Moist_clouds_block
+    ! swdn_toa is input
+    real, dimension(:,:,:),       intent(inout)          :: tdt_sw, tdt_lw, tdt_sw_clr, tdt_lw_clr
+    real, dimension(:,:),         intent(inout)          :: lwdn_sfc, lwup_sfc, swdn_sfc, swup_sfc,  &
+                                                            swdn_toa, swup_toa, olr, & 
+                                                            lwdn_sfc_clr, swdn_sfc_clr, swup_sfc_clr, &
+                                                            swup_toa_clr, olr_clr
+    !---------------------------------------------------------------------
+    ! local variables
+    integer :: i, j, isize, jsize, ksize, outunit
+    real, allocatable, dimension(:) :: input_X, output_Y
+    isize = size(temp,1)
+    jsize = size(temp,2)
+    ksize = size(temp,3)
+    ! diag, can be deleted
+    outunit = stdout()
+    write(outunit, *) 'nn batch size: ', isize, jsize, ksize
+    
     tdt_sw = 0.0
     tdt_lw = 0.0
     tdt_sw_clr = 0.0
     tdt_lw_clr = 0.0
-
-
-
+    !lwup_sfc = 0.0
+    !olr_clr = 0.0
+    !lwdn_sfc_clr = 0.0
+    ! loop over all locations, might be faster if do in all location
+    ! need to optimize/test in next dev
+    ! v0: for lwcs, input_X(102) , this will be change in the future version
+    allocate(input_X(size(Rad_NN_FC%layers(1)%weight,1)))
+    allocate(output_y(size(Rad_NN_FC%layers(Rad_NN_FC%num_layers)%weight,2)))
+    do j = 1, jsize
+        do i = 1, isize
+        input_X(1) = pflux(i,j,ksize+1)   ! ps
+        input_X(2:2+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+        input_X(3+ksize) = tsfc(i,j)
+        input_X(4+ksize:3+2*ksize) = rh2o(i,j,:)
+        input_X(4+2*ksize:3+3*ksize) = Rad_gases%qo3(i,j,:)
+        call Rad_NN_pred_1d(Rad_NN_FC, input_X, output_Y)
+        lwdn_sfc_clr(i,j) = output_Y(1) 
+        lwup_sfc(i,j) = output_Y(2) 
+        olr_clr(i,j) = output_Y(3) 
+        tdt_lw_clr(i,j,:) = output_Y(4:) 
+        end do
+    end do
+    
 end subroutine NN_radiation_calc
 
 
