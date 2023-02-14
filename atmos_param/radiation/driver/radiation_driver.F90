@@ -346,6 +346,7 @@ logical :: nonzero_rad_flux_init = .false.
 
 logical :: do_radiation = .true.
 logical :: do_rad_nn = .true.
+logical :: nn_diag_flag = .false.
 character(len=100) :: rad_nn_para_nc='INPUT/RadNN_AM4_para_default.nc'
 
 logical :: do_conserve_energy = .false.
@@ -475,6 +476,7 @@ namelist /radiation_driver_nml/ do_radiation, &
                                 nonzero_rad_flux_init, &
                                 do_conserve_energy, & 
                                 do_rad_nn, &
+                                nn_diag_flag, &
                                 rad_nn_para_nc
 !---------------------------------------------------------------------
 !---- public data ----
@@ -695,7 +697,7 @@ integer :: lw_rad_time_step  !  longwave radiative time step in seconds
 !-----------------------------------------------------------------------
 !    timing clocks       
 
-integer                      :: misc_clock, clouds_clock, calc_clock
+integer                      :: misc_clock, clouds_clock, calc_clock, nn_calc_clock
 
 !--------------------------------------------------------------------
 ! miscellaneous variables and indices
@@ -1381,6 +1383,9 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
                grain = CLOCK_MODULE)
       calc_clock =    &
             mpp_clock_id ('   Physics_down: Radiation: calc', &
+                grain = CLOCK_MODULE)
+      nn_calc_clock =    &
+            mpp_clock_id ('   Physics_down: Radiation: nn_c', &
                 grain = CLOCK_MODULE)
 
 !---------------------------------------------------------------------
@@ -2255,6 +2260,7 @@ integer :: irepeat
         allocate(nn_swup_sfc_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         allocate(nn_swup_toa_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         allocate(nn_olr_clr      (size(atmos_input%press, 1), size(atmos_input%press, 2)))
+        call mpp_clock_begin (nn_calc_clock)
         do irepeat = 1,4
         call NN_radiation_calc (atmos_input%pflux, atmos_input%temp, atmos_input%tflux, atmos_input%tsfc, &
                                 atmos_input%rh2o, rad_gases, astro%cosz, &
@@ -2267,6 +2273,7 @@ integer :: irepeat
                                 nn_lwdn_sfc_clr, nn_swdn_sfc_clr, nn_swup_sfc_clr, &
                                 nn_swup_toa_clr, nn_olr_clr ) 
         end do 
+        call mpp_clock_end (nn_calc_clock)
      ! send_data to diag files
         !3D atmosphere fields.
         if (idtlev .gt. 0) flag = send_data(idtlev, atmos_input%tflux, time_next, is, js, 1)
@@ -4882,9 +4889,10 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
     jsize = size(temp,2)
     ksize = size(temp,3)
     ! diag, can be deleted
-    outunit = stdout()
-    write(outunit, *) 'nn batch size: ', isize, jsize, ksize
-    
+    if (nn_diag_flag) then
+        outunit = stdout()
+        write(outunit, *) 'nn batch size: ', isize, jsize, ksize
+    end if
     tdt_sw = 0.0
     tdt_lw = 0.0
     tdt_sw_clr = 0.0
