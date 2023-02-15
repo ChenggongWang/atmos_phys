@@ -2235,7 +2235,7 @@ integer :: irepeat
       call mpp_clock_end (calc_clock)
 
 !   cgw: call NN_radiation_calc 
-    if (do_rad_NN) then
+if (do_rad_NN .and. do_rad) then
         allocate(nn_tdt_sw_clr   (size(atmos_input%press, 1), &
                                   size(atmos_input%press, 2), &
                                   size(atmos_input%press, 3)))
