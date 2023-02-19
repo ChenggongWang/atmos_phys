@@ -347,6 +347,7 @@ logical :: nonzero_rad_flux_init = .false.
 logical :: do_radiation = .true.
 logical :: do_rad_nn = .true.
 logical :: nn_diag_flag = .false.
+logical :: nn_diag_speed = .false.
 character(len=100) :: rad_nn_para_nc='INPUT/RadNN_AM4_para_default.nc'
 
 logical :: do_conserve_energy = .false.
@@ -477,6 +478,7 @@ namelist /radiation_driver_nml/ do_radiation, &
                                 do_conserve_energy, & 
                                 do_rad_nn, &
                                 nn_diag_flag, &
+                                nn_diag_speed, &
                                 rad_nn_para_nc
 !---------------------------------------------------------------------
 !---- public data ----
@@ -2261,7 +2263,7 @@ if (do_rad_NN .and. do_rad) then
         allocate(nn_swup_toa_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         allocate(nn_olr_clr      (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         call mpp_clock_begin (nn_calc_clock)
-        do irepeat = 1,4
+        do irepeat = 1,4 ! emulate clr- all- sky for lw and sw
         call NN_radiation_calc (atmos_input%pflux, atmos_input%temp, atmos_input%tflux, atmos_input%tsfc, &
                                 atmos_input%rh2o, rad_gases, astro%cosz, &
                                 surface%asfc_vis_dir, surface%asfc_vis_dif, surface%asfc_nir_dir, surface%asfc_nir_dif, &
@@ -4803,30 +4805,81 @@ end subroutine radiation_calc
 real elemental function NN_activ(x)
     real, intent(in) :: x
     ! ReLU:
-    if (x>0) then
-        NN_activ = x
-    else
-        NN_activ = 0
-    end if
+    !if (x>0) then
+    !    NN_activ = x
+    !else
+    !    NN_activ = 0
+    !end if
+    NN_activ = max(0.0,x)
     ! tanh
     ! y = tanh(x)
 end function NN_activ
+subroutine nn_pred_1d_sgemm(FNN,x,y)
+    type(NN_FC_type),   intent(in)    :: FNN
+    real, dimension(:), intent(in)    :: x
+    real, dimension(:), intent(inout) :: y
+    ! local
+    integer :: ilayer
+    real, dimension(:), allocatable :: interm1, interm2
+    ! for sgemm
+    integer :: m, k, n
+    real :: alpha, beta
+    alpha = 1.0
+    beta = 1.0
+
+    allocate(interm1(size(x)))
+    interm1 = x
+    do ilayer = 1, FNN%num_layers
+        m = 1
+        k = size(interm1)
+        n = size(FNN%Layers(ilayer)%bias)
+        allocate(interm2(n))
+        interm2 = FNN%Layers(ilayer)%bias
+        !call DGEMM('N','N',m,n,k,1.0,interm1,m,FNN%Layers(ilayer)%weight,k,1.0,interm2,m)
+        call DGEMV('T',k,n,alpha,FNN%Layers(ilayer)%weight,k,interm1,1,beta,interm2,1)
+        interm2 = NN_activ(interm2)
+        deallocate(interm1)
+        allocate(interm1(n))
+        interm1 = interm2
+        deallocate(interm2)
+    end do
+    y = interm1
+    deallocate(interm1)
+end subroutine nn_pred_1d_sgemm
+
+subroutine nn_pred_1d_matmul(FNN,x,y)
+    type(NN_FC_type),   intent(in) :: FNN
+    real, dimension(:), intent(in) :: x
+    real, dimension(:), intent(inout) :: y
+    real, dimension(:), allocatable :: interm1, interm2
+    integer :: ilayer, n
+    allocate(interm1(size(x)))
+    interm1 = x
+    ! num_layers matmul called
+    do ilayer = 1, FNN%num_layers
+        n = size(FNN%Layers(ilayer)%bias)
+        allocate(interm2(n))
+        interm2 = matmul(interm1,FNN%Layers(ilayer)%weight) + FNN%Layers(ilayer)%bias
+        !interm2 = NN_activ(interm2)
+        deallocate(interm1)
+        allocate(interm1(n))
+        interm1 = interm2
+        deallocate(interm2)
+    end do
+    y = interm1
+    deallocate(interm1)
+end subroutine nn_pred_1d_matmul
 ! FNN for one column 
 subroutine Rad_NN_pred_1d(model, input_X, output_Y)
 ! a specific implement for Li5ReluBN
     type(NN_FC_type),    intent(in)     :: model
     real,  dimension(:), intent(in)     :: input_X
     real,  dimension(:), intent(inout)  :: output_Y
-    ! first 4 Linear>Relu>BN
     ! local variables
     real, allocatable, dimension(:)    :: interm_X
     integer :: ilayer, k 
 
-    ! interm_size = Rad_NN_FC%num_hid_nodes
-    ! num_layers  = Rad_NN_FC%num_layers
-
     allocate(interm_X(model%num_hid_nodes))
-
     do ilayer = 1, model%num_layers-1
         ! y = x*w+b
         if (ilayer == 1) then
@@ -4838,6 +4891,7 @@ subroutine Rad_NN_pred_1d(model, input_X, output_Y)
         interm_X = NN_activ(interm_X)
     end do
     output_Y = matmul (interm_X, model%Layers(ilayer)%weight) + model%Layers(ilayer)%bias
+    deallocate(interm_X)
     ! limiter
     do k = 1, size(output_Y)
         if (output_Y(k)>1E4) then
@@ -4893,30 +4947,36 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
         outunit = stdout()
         write(outunit, *) 'nn batch size: ', isize, jsize, ksize
     end if
-    tdt_sw = 0.0
-    tdt_lw = 0.0
+    tdt_sw = 1.0
+    tdt_lw = 1.0
     tdt_sw_clr = 0.0
     tdt_lw_clr = 0.0
-    !lwup_sfc = 0.0
-    !olr_clr = 0.0
-    !lwdn_sfc_clr = 0.0
+    lwup_sfc = 0.0
+    olr_clr = 0.0
+    lwdn_sfc_clr = 0.0
     ! loop over all locations, might be faster if do in all location
     ! need to optimize/test in next dev
     ! v0: for lwcs, input_X(102) , this will be change in the future version
+    
     allocate(input_X(size(Rad_NN_FC%layers(1)%weight,1)))
-    allocate(output_y(size(Rad_NN_FC%layers(Rad_NN_FC%num_layers)%weight,2)))
+    allocate(output_y(size(Rad_NN_FC%layers(Rad_NN_FC%num_layers)%bias)))
     do j = 1, jsize
         do i = 1, isize
-        input_X(1) = pflux(i,j,ksize+1)   ! ps
-        input_X(2:2+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
-        input_X(3+ksize) = tsfc(i,j)
-        input_X(4+ksize:3+2*ksize) = rh2o(i,j,:)
-        input_X(4+2*ksize:3+3*ksize) = Rad_gases%qo3(i,j,:)
-        call Rad_NN_pred_1d(Rad_NN_FC, input_X, output_Y)
-        lwdn_sfc_clr(i,j) = output_Y(1) 
-        lwup_sfc(i,j) = output_Y(2) 
-        olr_clr(i,j) = output_Y(3) 
-        tdt_lw_clr(i,j,:) = output_Y(4:) 
+            input_X(1) = pflux(i,j,ksize+1)   ! ps
+            input_X(2:2+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+            input_X(3+ksize) = tsfc(i,j)
+            input_X(4+ksize:3+2*ksize) = rh2o(i,j,:)
+            input_X(4+2*ksize:3+3*ksize) = Rad_gases%qo3(i,j,:)
+            !call Rad_NN_pred_1d(Rad_NN_FC, input_X, output_Y)
+            if (nn_diag_speed) then
+                call NN_pred_1d_matmul(Rad_NN_FC, input_X, output_Y)
+            else
+                call NN_pred_1d_sgemm (Rad_NN_FC, input_X, output_Y)
+            end if 
+            lwdn_sfc_clr(i,j) = output_Y(1) 
+            lwup_sfc(i,j)     = output_Y(2) 
+            olr_clr(i,j)      = output_Y(3) 
+            tdt_lw_clr(i,j,:) = output_Y(4:) 
         end do
     end do
     
