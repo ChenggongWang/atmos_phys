@@ -36,6 +36,7 @@
 !!</BUG>
 !! </INFO>
 !    shared modules:
+use, intrinsic :: iso_fortran_env, only: real32
 
 use block_control_mod,     only: block_control_type
 use mpp_mod,               only: input_nml_file, mpp_get_current_pelist
@@ -548,8 +549,8 @@ end type radiation_diag_type
 !----------------------------------------------------------------------
 public NN_Linear_layer_type
 type :: NN_Linear_layer_type 
-    real, dimension(:,:), pointer :: weight=>NULL()
-    real, dimension(:),   pointer :: bias=>NULL()
+    real(kind=real32), dimension(:,:), pointer :: weight=>NULL()
+    real(kind=real32), dimension(:),   pointer :: bias=>NULL()
 end type NN_Linear_layer_type
 public NN_FC_type
 type :: NN_FC_type
@@ -4803,7 +4804,7 @@ end subroutine radiation_calc
 ! cgw: function and subroutine for an NN to predict
 ! NN activation function
 real elemental function NN_activ(x)
-    real, intent(in) :: x
+    real(kind=real32), intent(in) :: x
     ! ReLU:
     !if (x>0) then
     !    NN_activ = x
@@ -4816,14 +4817,14 @@ real elemental function NN_activ(x)
 end function NN_activ
 subroutine nn_pred_1d_sgemm(FNN,x,y)
     type(NN_FC_type),   intent(in)    :: FNN
-    real, dimension(:), intent(in)    :: x
-    real, dimension(:), intent(inout) :: y
+    real(kind=real32), dimension(:), intent(in)    :: x
+    real(kind=real32), dimension(:), intent(inout) :: y
     ! local
     integer :: ilayer
-    real, dimension(:), allocatable :: interm1, interm2
+    real(kind=real32), dimension(:), allocatable :: interm1, interm2
     ! for sgemm
     integer :: m, k, n
-    real :: alpha, beta
+    real(kind=real32) :: alpha, beta
     alpha = 1.0
     beta = 1.0
 
@@ -4835,8 +4836,8 @@ subroutine nn_pred_1d_sgemm(FNN,x,y)
         n = size(FNN%Layers(ilayer)%bias)
         allocate(interm2(n))
         interm2 = FNN%Layers(ilayer)%bias
-        !call DGEMM('N','N',m,n,k,1.0,interm1,m,FNN%Layers(ilayer)%weight,k,1.0,interm2,m)
-        call DGEMV('T',k,n,alpha,FNN%Layers(ilayer)%weight,k,interm1,1,beta,interm2,1)
+        !call SGEMM('N','N',m,n,k,1.0,interm1,m,FNN%Layers(ilayer)%weight,k,1.0,interm2,m)
+        call SGEMV('T',k,n,alpha,FNN%Layers(ilayer)%weight,k,interm1,1,beta,interm2,1)
         interm2 = NN_activ(interm2)
         deallocate(interm1)
         allocate(interm1(n))
@@ -4849,9 +4850,9 @@ end subroutine nn_pred_1d_sgemm
 
 subroutine nn_pred_1d_matmul(FNN,x,y)
     type(NN_FC_type),   intent(in) :: FNN
-    real, dimension(:), intent(in) :: x
-    real, dimension(:), intent(inout) :: y
-    real, dimension(:), allocatable :: interm1, interm2
+    real(kind=real32), dimension(:), intent(in) :: x
+    real(kind=real32), dimension(:), intent(inout) :: y
+    real(kind=real32), dimension(:), allocatable :: interm1, interm2
     integer :: ilayer, n
     allocate(interm1(size(x)))
     interm1 = x
@@ -4860,7 +4861,7 @@ subroutine nn_pred_1d_matmul(FNN,x,y)
         n = size(FNN%Layers(ilayer)%bias)
         allocate(interm2(n))
         interm2 = matmul(interm1,FNN%Layers(ilayer)%weight) + FNN%Layers(ilayer)%bias
-        !interm2 = NN_activ(interm2)
+        interm2 = NN_activ(interm2)
         deallocate(interm1)
         allocate(interm1(n))
         interm1 = interm2
@@ -4868,40 +4869,6 @@ subroutine nn_pred_1d_matmul(FNN,x,y)
     end do
     y = interm1
     deallocate(interm1)
-end subroutine nn_pred_1d_matmul
-! FNN for one column 
-subroutine Rad_NN_pred_1d(model, input_X, output_Y)
-! a specific implement for Li5ReluBN
-    type(NN_FC_type),    intent(in)     :: model
-    real,  dimension(:), intent(in)     :: input_X
-    real,  dimension(:), intent(inout)  :: output_Y
-    ! local variables
-    real, allocatable, dimension(:)    :: interm_X
-    integer :: ilayer, k 
-
-    allocate(interm_X(model%num_hid_nodes))
-    do ilayer = 1, model%num_layers-1
-        ! y = x*w+b
-        if (ilayer == 1) then
-            interm_X = matmul (input_X , model%Layers(ilayer)%weight)  + model%Layers(ilayer)%bias
-        else                                                       
-            interm_X = matmul (interm_X, model%Layers(ilayer)%weight) + model%Layers(ilayer)%bias
-        end if
-        ! y = sigma(y) apply activation function for all nodes
-        interm_X = NN_activ(interm_X)
-    end do
-    output_Y = matmul (interm_X, model%Layers(ilayer)%weight) + model%Layers(ilayer)%bias
-    deallocate(interm_X)
-    ! limiter
-    do k = 1, size(output_Y)
-        if (output_Y(k)>1E4) then
-            output_Y(k) = 1E4
-        else if (output_Y(k)<-1E4) then
-            output_Y(k) =-1E4
-        end if
-    end do
-end subroutine Rad_NN_pred_1d
-
 !######################################################################
 ! cgw: subroutine to apply NN 
 !      only consider ozone and cloud, no aerosol and other GHGs for now
@@ -4938,7 +4905,7 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
     !---------------------------------------------------------------------
     ! local variables
     integer :: i, j, isize, jsize, ksize, outunit
-    real, allocatable, dimension(:) :: input_X, output_Y
+    real(kind=real32), allocatable, dimension(:) :: input_X, output_Y
     isize = size(temp,1)
     jsize = size(temp,2)
     ksize = size(temp,3)
