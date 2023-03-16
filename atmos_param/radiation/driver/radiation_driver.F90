@@ -349,7 +349,7 @@ logical :: do_radiation = .true.
 logical :: do_rad_nn = .true.
 logical :: nn_diag_flag = .false.
 logical :: nn_diag_speed = .false.
-character(len=100) :: rad_nn_para_nc='INPUT/RadNN_AM4_para_default.nc'
+character(len=100) :: rad_nn_para_nc = 'RadNN_AM4_para_default'
 
 logical :: do_conserve_energy = .false.
                                       ! when true, the actually model layer
@@ -780,13 +780,12 @@ type (domain2D)               :: radiation_domain !< Atmosphere domain
 !---------------------------------------------------------------------
 
 ! cgw: for NN_para
-!type(NN_Linear_layer_type), allocatable, dimension(:)  :: Rad_NN_Layers
-type(NN_FC_type)   :: Rad_NN_FC
+type(NN_FC_type), dimension(4):: Rad_NN_FC
 ! cgw: for NN_diag
 integer :: idtlev, idplay, idtlay, idh2o, ido3, idzlay, idsd, &
            idsf, idsl, idsi, idcd, idcf, idcl, idci, &
            idps, idts, idzen, &
-           idvdir, idvdif, ididir, ididif, idfrac, idland, ider, idsolar, &
+           idvdir, idvdif, ididir, ididif, idfrac, idland, ider,idsolarfact, idsolar, &
            id_nn_tdt_lw, id_nn_tdt_sw, &
            id_nn_lwdn_sfc, id_nn_lwup_sfc, id_nn_swdn_sfc, id_nn_swup_sfc, &
            id_nn_swdn_toa, id_nn_swup_toa, id_nn_olr, &
@@ -912,7 +911,8 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
       character(len=32) :: mod_name
       character(len=32) :: fmt_str
       type(FmsNetcdfFile_t)       :: Rad_NN_para_fileobj        !< Fms2_io fileobj
-      integer :: nn_size0, nn_size1
+      character(len=100), dimension(4) :: rad_nn_para_nc_4filepath
+      integer :: nn_size0, nn_size1, inn
       integer :: nn_num_layers, ilayer
       integer, dimension(4) :: a
 !---------------------------------------------------------------------
@@ -1540,89 +1540,55 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
                  'Initializing the rad_nn module', NOTE)
         call error_mesg ('radiation_driver_mod',  &
                  'Reading NetCDF file to obtain NN parameters. INPUT/'//trim(rad_nn_para_nc), NOTE)
-        if (open_file(Rad_NN_para_fileobj, "INPUT/"//trim(rad_nn_para_nc), "read" )) then
-            ! read num of NN layers
-            call read_data(Rad_NN_para_fileobj, 'LN', nn_num_layers)
+        rad_nn_para_nc_4filepath(1) = "INPUT/"//trim(rad_nn_para_nc)//"lw_csaf_Li5Relu_EY.nc"
+        rad_nn_para_nc_4filepath(2) = "INPUT/"//trim(rad_nn_para_nc)//"lw_af_Li5Relu_EY.nc"
+        rad_nn_para_nc_4filepath(3) = "INPUT/"//trim(rad_nn_para_nc)//"sw_csaf_Li5Relu_EY.nc"
+        rad_nn_para_nc_4filepath(4) = "INPUT/"//trim(rad_nn_para_nc)//"sw_af_Li5Relu_EY.nc"
+        
+        do inn = 1, 4
+            if (open_file(Rad_NN_para_fileobj, rad_nn_para_nc_4filepath(inn), "read" )) then
+                ! read num of NN layers
+                call read_data(Rad_NN_para_fileobj, 'LN', nn_num_layers)
 
-            Rad_NN_FC%num_layers = nn_num_layers
-            allocate(Rad_NN_FC%Layers(Rad_NN_FC%num_layers))
-            ! read weight and bias for each layer
-            do ilayer = 1, nn_num_layers 
-                ! read size of each layer
-                write (fmt_str, "(A4,I1,I1)") "size", ilayer, 0
-                call read_data(Rad_NN_para_fileobj, fmt_str, nn_size0)
-                write (fmt_str, "(A4,I1,I1)") "size", ilayer, 1
-                call read_data(Rad_NN_para_fileobj, fmt_str, nn_size1)
-                allocate(Rad_NN_FC%Layers(ilayer)%weight(nn_size1,nn_size0)) !fortran reverse order
-                allocate(Rad_NN_FC%Layers(ilayer)%bias(nn_size0))
-                write(outunit,*) 'nn_size', nn_size0, nn_size1
-                write (fmt_str, "(A1,I1)") "W", ilayer
-                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_FC%Layers(ilayer)%weight(:,:))
-                write (fmt_str, "(A1,I1)") "B", ilayer
-                call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_FC%Layers(ilayer)%bias(:))
-                ! for diagnose purpose
-                write(outunit,*) Rad_NN_FC%Layers(ilayer)%bias 
-            end do 
-            Rad_NN_FC%num_hid_nodes = nn_size1
-            call close_file(Rad_NN_para_fileobj)
-        else
-            call error_mesg ('radiation_driver_mod',  &
-                 'rad_nn_para_nc file open failed. INPUT/'//trim(rad_nn_para_nc), FATAL)
-        endif
+                Rad_NN_FC(inn)%num_layers = nn_num_layers
+                allocate(Rad_NN_FC(inn)%Layers(Rad_NN_FC(inn)%num_layers))
+                ! read weight and bias for each layer
+                do ilayer = 1, nn_num_layers 
+                    ! read size of each layer
+                    write (fmt_str, "(A4,I1,I1)") "size", ilayer, 0
+                    call read_data(Rad_NN_para_fileobj, fmt_str, nn_size0)
+                    write (fmt_str, "(A4,I1,I1)") "size", ilayer, 1
+                    call read_data(Rad_NN_para_fileobj, fmt_str, nn_size1)
+                    allocate(Rad_NN_FC(inn)%Layers(ilayer)%weight(nn_size1,nn_size0)) !fortran reverse order
+                    allocate(Rad_NN_FC(inn)%Layers(ilayer)%bias(nn_size0))
+                    write(outunit,*) 'nn_size', nn_size0, nn_size1
+                    write (fmt_str, "(A1,I1)") "W", ilayer
+                    call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_FC(inn)%Layers(ilayer)%weight(:,:))
+                    write (fmt_str, "(A1,I1)") "B", ilayer
+                    call read_data(Rad_NN_para_fileobj, fmt_str, Rad_NN_FC(inn)%Layers(ilayer)%bias(:))
+                    ! for diagnose purpose
+                    write(outunit,*) Rad_NN_FC(inn)%Layers(ilayer)%bias 
+                end do 
+                Rad_NN_FC(inn)%num_hid_nodes = nn_size1
+                call close_file(Rad_NN_para_fileobj)
+            else
+                call error_mesg ('radiation_driver_mod',  &
+                     'rad_nn_para_nc file open failed. '//trim(rad_nn_para_nc_4filepath(inn)), FATAL)
+            endif
+        end do
 
         ! diag
         mod_name = "NN_diag"
         write(outunit,*) 'register output mod: ', mod_name
         a(1:2) = axes(1:2)
-        a(3) = axes(4)
-        !3D atmosphere fields.
-        ! phalf
-        idtlev = register_diag_field(mod_name, "tflux", a(1:3), time, &
-                                     "level temperature", "K")
-
         ! pfull
         a(3) = axes(3)
-        idtlay = register_diag_field(mod_name, "ta", a(1:3), time, &
-                                     "layer temperature", "K")
-        idzlay = register_diag_field(mod_name, "layer_thickness", a(1:3), time, &
-                                     "layer_thickness", "m")
-        idsd = register_diag_field(mod_name, "stratiform_droplet_number", a(1:3), time, &
-                                   "stratiform_droplet_number", "")
-        idsf = register_diag_field(mod_name, "stratiform_cloud_fraction", a(1:3), time, &
-                                   "stratiform_cloud_fraction", "none")
-        idsl = register_diag_field(mod_name, "stratiform_liquid_content", a(1:3), time, &
-                                   "stratiform_liquid_content", "")
-        idsi = register_diag_field(mod_name, "stratiform_ice_content", a(1:3), time, &
-                                   "stratiform_ice_content", "")
-        idcd = register_diag_field(mod_name, "shallow_droplet_number", a(1:3), time, &
-                                   "shallow_droplet_number", "")
-        idcf = register_diag_field(mod_name, "shallow_cloud_fraction", a(1:3), time, &
-                                   "shallow_cloud_fraction", "none")
-        idcl = register_diag_field(mod_name, "shallow_liquid_content", a(1:3), time, &
-                                   "shallow_liquid_content", "")
-        idci = register_diag_field(mod_name, "shallow_ice_content", a(1:3), time, &
-                                   "shallow_ice_content", "")
 
         id_nn_tdt_lw = register_diag_field(mod_name, "nn_tdt_lw", a(1:3), time,  "nn_tdt_lw", "K/s")
         id_nn_tdt_sw = register_diag_field(mod_name, "nn_tdt_sw", a(1:3), time,  "nn_tdt_sw", "K/s")
         id_nn_tdt_lw_clr = register_diag_field(mod_name, "nn_tdt_lw_clr", a(1:3), time,  "nn_tdt_lw_clr", "K/s")
         id_nn_tdt_sw_clr = register_diag_field(mod_name, "nn_tdt_sw_clr", a(1:3), time,  "nn_tdt_sw_clr", "K/s")
 
-        !2D fields (non-vertical)
-        idps = register_diag_field(mod_name, "ps", a(1:2), time, &
-                                     "surface pressure", "Pa")
-        idts = register_diag_field(mod_name, "ts", a(1:2), time, &
-                                   "surface temperature", "K")
-        idzen = register_diag_field(mod_name, "cosine_zenith", a(1:2), time, &
-                                    "cosine_zenith", "none")
-        idvdir = register_diag_field(mod_name, "visible_direct_albedo", a(1:2), time, &
-                                     "visible_direct_albedo", "none")
-        idvdif = register_diag_field(mod_name, "visible_diffuse_albedo", a(1:2), time, &
-                                     "visible_diffuse_albedo", "none")
-        ididir = register_diag_field(mod_name, "infrared_direct_albedo", a(1:2), time, &
-                                     "infrared_direct_albedo", "none")
-        ididif = register_diag_field(mod_name, "infrared_diffuse_albedo", a(1:2), time, &
-                                     "infrared_diffuse_albedo", "none")
 
         id_nn_lwdn_sfc = register_diag_field(mod_name, "nn_lwdn_sfc", a(1:2), time,  "nn_lwdn_sfc", "Wm-2")
         id_nn_lwup_sfc = register_diag_field(mod_name, "nn_lwup_sfc", a(1:2), time,  "nn_lwup_sfc", "Wm-2")
@@ -1637,13 +1603,69 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
         id_nn_swup_toa_clr = register_diag_field(mod_name, "nn_swup_toa_clr", a(1:2), time,  "nn_swup_toa_clr", "Wm-2")
         id_nn_olr_clr      = register_diag_field(mod_name, "nn_olr_clr", a(1:2), time,  "nn_olr_clr", "Wm-2")
 
-        !1D 
-
-        ider = register_diag_field(mod_name, "earth_sun_distance_fraction", time, &
-                                   "earth_sun_distance_fraction", "none")
-        idsolar = register_diag_field(mod_name, "solar_constant", time, &
-                                      "solar_constant", "none")
     endif ! do_rad_nn
+    ! diag
+    mod_name = "NN_diag"
+    write(outunit,*) 'register output mod: ', mod_name
+    a(1:2) = axes(1:2)
+    a(3) = axes(4)
+    !3D atmosphere fields.
+    ! phalf
+    idtlev = register_diag_field(mod_name, "tflux", a(1:3), time, &
+                                 "level temperature", "K")
+
+    ! pfull
+    a(3) = axes(3)
+    idtlay = register_diag_field(mod_name, "ta", a(1:3), time, &
+                                 "layer temperature", "K")
+    idzlay = register_diag_field(mod_name, "layer_thickness", a(1:3), time, &
+                                 "layer_thickness", "m")
+    idh2o = register_diag_field(mod_name, "water_vapor", a(1:3), time, &
+                                "water_vapor", "kg water / kg dry")
+    ido3 = register_diag_field(mod_name, "ozone", a(1:3), time, &
+                             "ozone", "mol mol-1")
+    idsd = register_diag_field(mod_name, "stratiform_droplet_number", a(1:3), time, &
+                               "stratiform_droplet_number", "")
+    idsf = register_diag_field(mod_name, "stratiform_cloud_fraction", a(1:3), time, &
+                               "stratiform_cloud_fraction", "none")
+    idsl = register_diag_field(mod_name, "stratiform_liquid_content", a(1:3), time, &
+                               "stratiform_liquid_content", "")
+    idsi = register_diag_field(mod_name, "stratiform_ice_content", a(1:3), time, &
+                               "stratiform_ice_content", "")
+    idcd = register_diag_field(mod_name, "shallow_droplet_number", a(1:3), time, &
+                               "shallow_droplet_number", "")
+    idcf = register_diag_field(mod_name, "shallow_cloud_fraction", a(1:3), time, &
+                               "shallow_cloud_fraction", "none")
+    idcl = register_diag_field(mod_name, "shallow_liquid_content", a(1:3), time, &
+                               "shallow_liquid_content", "")
+    idci = register_diag_field(mod_name, "shallow_ice_content", a(1:3), time, &
+                               "shallow_ice_content", "")
+    !2D fields (non-vertical)
+    idps = register_diag_field(mod_name, "ps", a(1:2), time, &
+                                 "surface pressure", "Pa")
+    idts = register_diag_field(mod_name, "ts", a(1:2), time, &
+                               "surface temperature", "K")
+    idvdir = register_diag_field(mod_name, "visible_direct_albedo", a(1:2), time, &
+                                 "visible_direct_albedo", "none")
+    idvdif = register_diag_field(mod_name, "visible_diffuse_albedo", a(1:2), time, &
+                                 "visible_diffuse_albedo", "none")
+    ididir = register_diag_field(mod_name, "infrared_direct_albedo", a(1:2), time, &
+                                 "infrared_direct_albedo", "none")
+    ididif = register_diag_field(mod_name, "infrared_diffuse_albedo", a(1:2), time, &
+                                 "infrared_diffuse_albedo", "none")
+    idsolarfact = register_diag_field(mod_name, "solarfactor", a(1:2), time, &
+                                 "solarfactor", "none")
+    idzen = register_diag_field(mod_name, "cosz", a(1:2), time, &
+                                "cosz", "none")
+    idfrac = register_diag_field(mod_name, "dayf", a(1:2), time, &
+                               "dayf", "none")
+    !1D 
+    idsolar = register_diag_field(mod_name, "solar_constant", time, &
+                                  "solar_constant", "none")
+    ! earth_sun_distance_fraction
+    ider = register_diag_field(mod_name, "rrsun", time, &
+                               "rrsun", "none")
+
 
 end subroutine radiation_driver_init
 
@@ -2038,6 +2060,7 @@ real, dimension(:,:),   allocatable :: nn_swdn_sfc_clr
 real, dimension(:,:),   allocatable :: nn_swup_sfc_clr
 real, dimension(:,:),   allocatable :: nn_swup_toa_clr
 real, dimension(:,:),   allocatable :: nn_olr_clr            
+real    :: solar_constant_used         
 logical :: flag            
 integer :: n 
 integer :: irepeat 
@@ -2238,7 +2261,7 @@ integer :: irepeat
       call mpp_clock_end (calc_clock)
 
 !   cgw: call NN_radiation_calc 
-if (do_rad_NN .and. do_rad) then
+    if (do_rad_NN .and. do_rad) then
         allocate(nn_tdt_sw_clr   (size(atmos_input%press, 1), &
                                   size(atmos_input%press, 2), &
                                   size(atmos_input%press, 3)))
@@ -2264,9 +2287,9 @@ if (do_rad_NN .and. do_rad) then
         allocate(nn_swup_toa_clr (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         allocate(nn_olr_clr      (size(atmos_input%press, 1), size(atmos_input%press, 2)))
         call mpp_clock_begin (nn_calc_clock)
-        do irepeat = 1,4 ! emulate clr- all- sky for lw and sw
+        call get_solar_constant(solar_constant_used)
         call NN_radiation_calc (atmos_input%pflux, atmos_input%temp, atmos_input%tflux, atmos_input%tsfc, &
-                                atmos_input%rh2o, rad_gases, astro%cosz, &
+                                atmos_input%rh2o, rad_gases, Astro, solar_constant_used, &
                                 surface%asfc_vis_dir, surface%asfc_vis_dif, surface%asfc_nir_dir, surface%asfc_nir_dif, &
                                 moist_clouds_block, &
                                 nn_tdt_sw, nn_tdt_lw, &
@@ -2275,48 +2298,13 @@ if (do_rad_NN .and. do_rad) then
                                 nn_tdt_sw_clr, nn_tdt_lw_clr, &
                                 nn_lwdn_sfc_clr, nn_swdn_sfc_clr, nn_swup_sfc_clr, &
                                 nn_swup_toa_clr, nn_olr_clr ) 
-        end do 
         call mpp_clock_end (nn_calc_clock)
-     ! send_data to diag files
-        !3D atmosphere fields.
-        if (idtlev .gt. 0) flag = send_data(idtlev, atmos_input%tflux, time_next, is, js, 1)
-        if (idtlay .gt. 0) flag = send_data(idtlay, atmos_input%temp, time_next, is, js, 1)
-        if (idzlay .gt. 0) flag = send_data(idzlay, atmos_input%deltaz, time_next, is, js, 1)
-        
-
-        !Clouds
-        n = moist_clouds_block%index_strat
-        if (idsd .gt. 0) flag = send_data(idsd, moist_clouds_block%cloud_data(n)%droplet_number, &
-                                          time_next, is, js, 1)
-        if (idsf .gt. 0) flag = send_data(idsf, moist_clouds_block%cloud_data(n)%cloud_area, &
-                                          time_next, is, js, 1)
-        if (idsl .gt. 0) flag = send_data(idsl, moist_clouds_block%cloud_data(n)%liquid_amt, &
-                                          time_next, is, js, 1)
-        if (idsi .gt. 0) flag = send_data(idsi, moist_clouds_block%cloud_data(n)%ice_amt, &
-                                          time_next, is, js, 1) 
-        n = moist_clouds_block%index_uw_conv
-        if (idcd .gt. 0) flag = send_data(idcd, moist_clouds_block%cloud_data(n)%droplet_number, &
-                                          time_next, is, js, 1)
-        if (idcf .gt. 0) flag = send_data(idcf, moist_clouds_block%cloud_data(n)%cloud_area, &
-                                          time_next, is, js, 1)
-        if (idcl .gt. 0) flag = send_data(idcl, moist_clouds_block%cloud_data(n)%liquid_amt, &
-                                          time_next, is, js, 1)
-        if (idci .gt. 0) flag = send_data(idci, moist_clouds_block%cloud_data(n)%ice_amt, &
-                                          time_next, is, js, 1)
         
         !3D heating rate
         if (id_nn_tdt_lw     .gt. 0) flag = send_data(id_nn_tdt_lw    , nn_tdt_lw    , time_next, is, js, 1)
         if (id_nn_tdt_sw     .gt. 0) flag = send_data(id_nn_tdt_sw    , nn_tdt_sw    , time_next, is, js, 1)
         if (id_nn_tdt_lw_clr .gt. 0) flag = send_data(id_nn_tdt_lw_clr, nn_tdt_lw_clr, time_next, is, js, 1)
         if (id_nn_tdt_sw_clr .gt. 0) flag = send_data(id_nn_tdt_sw_clr, nn_tdt_sw_clr, time_next, is, js, 1)
-        !2D atmosphere fields.
-        if (idps .gt. 0) flag = send_data(idps, atmos_input%psfc, time_next, is, js)
-        if (idts .gt. 0) flag = send_data(idts, atmos_input%tsfc, time_next, is, js)
-        if (idzen .gt. 0) flag = send_data(idzen, astro%cosz, time_next, is, js)
-        if (idvdir .gt. 0) flag = send_data(idvdir, surface%asfc_vis_dir, time_next, is, js)
-        if (idvdif .gt. 0) flag = send_data(idvdif, surface%asfc_vis_dif, time_next, is, js)
-        if (ididir .gt. 0) flag = send_data(ididir, surface%asfc_nir_dir, time_next, is, js)
-        if (ididif .gt. 0) flag = send_data(ididif, surface%asfc_nir_dif, time_next, is, js)
         
         !2D boundary flux
         if (id_nn_lwdn_sfc .gt. 0) flag = send_data(id_nn_lwdn_sfc, nn_lwdn_sfc, time_next, is, js)
@@ -2327,14 +2315,11 @@ if (do_rad_NN .and. do_rad) then
         if (id_nn_swup_toa .gt. 0) flag = send_data(id_nn_swup_toa, nn_swup_toa, time_next, is, js)
         if (id_nn_olr      .gt. 0) flag = send_data(id_nn_olr     , nn_olr     , time_next, is, js)
         
+        if (id_nn_olr_clr      .gt. 0) flag = send_data(id_nn_olr_clr     , nn_olr_clr     , time_next, is, js)
         if (id_nn_lwdn_sfc_clr .gt. 0) flag = send_data(id_nn_lwdn_sfc_clr, nn_lwdn_sfc_clr, time_next, is, js)
         if (id_nn_swdn_sfc_clr .gt. 0) flag = send_data(id_nn_swdn_sfc_clr, nn_swdn_sfc_clr, time_next, is, js)
         if (id_nn_swup_sfc_clr .gt. 0) flag = send_data(id_nn_swup_sfc_clr, nn_swup_sfc_clr, time_next, is, js)
         if (id_nn_swup_toa_clr .gt. 0) flag = send_data(id_nn_swup_toa_clr, nn_swup_toa_clr, time_next, is, js)
-        if (id_nn_olr_clr      .gt. 0) flag = send_data(id_nn_olr_clr     , nn_olr_clr     , time_next, is, js)
-        
-        !1D
-        if (ider .gt. 0) flag = send_data(ider, astro%rrsun, time_next)
 
 
         ! deallocate NN resluts
@@ -2355,11 +2340,48 @@ if (do_rad_NN .and. do_rad) then
         if (allocated(nn_swup_toa_clr)) deallocate(nn_swup_toa_clr)
         if (allocated(nn_olr_clr     )) deallocate(nn_olr_clr     )
     endif ! do_rad_nn
+    ! send_data to diag files
+    !3D atmosphere fields.
+    if (idtlev .gt. 0) flag = send_data(idtlev, atmos_input%tflux, time_next, is, js, 1)
+    if (idtlay .gt. 0) flag = send_data(idtlay, atmos_input%temp,  time_next, is, js, 1)
+    if (idzlay .gt. 0) flag = send_data(idzlay, atmos_input%deltaz,time_next, is, js, 1)
+    if (idh2o  .gt. 0) flag = send_data(idh2o,  atmos_input%rh2o,  time_next, is, js, 1)
+    if (ido3   .gt. 0) flag = send_data(ido3,   rad_gases%qo3,     time_next, is, js, 1)
 
+    !Clouds
+    n = moist_clouds_block%index_strat
+    if (idsd .gt. 0) flag = send_data(idsd, moist_clouds_block%cloud_data(n)%droplet_number, &
+                                      time_next, is, js, 1)
+    if (idsf .gt. 0) flag = send_data(idsf, moist_clouds_block%cloud_data(n)%cloud_area, &
+                                      time_next, is, js, 1)
+    if (idsl .gt. 0) flag = send_data(idsl, moist_clouds_block%cloud_data(n)%liquid_amt, &
+                                      time_next, is, js, 1)
+    if (idsi .gt. 0) flag = send_data(idsi, moist_clouds_block%cloud_data(n)%ice_amt, &
+                                      time_next, is, js, 1) 
+    n = moist_clouds_block%index_uw_conv
+    if (idcd .gt. 0) flag = send_data(idcd, moist_clouds_block%cloud_data(n)%droplet_number, &
+                                      time_next, is, js, 1)
+    if (idcf .gt. 0) flag = send_data(idcf, moist_clouds_block%cloud_data(n)%cloud_area, &
+                                      time_next, is, js, 1)
+    if (idcl .gt. 0) flag = send_data(idcl, moist_clouds_block%cloud_data(n)%liquid_amt, &
+                                      time_next, is, js, 1)
+    if (idci .gt. 0) flag = send_data(idci, moist_clouds_block%cloud_data(n)%ice_amt, &
+                                      time_next, is, js, 1)
+    !2D atmosphere fields.
+    if (idps   .gt. 0) flag = send_data(idps,   atmos_input%psfc,     time_next, is, js)
+    if (idts   .gt. 0) flag = send_data(idts,   atmos_input%tsfc,     time_next, is, js)
+    if (idvdir .gt. 0) flag = send_data(idvdir, surface%asfc_vis_dir, time_next, is, js)
+    if (idvdif .gt. 0) flag = send_data(idvdif, surface%asfc_vis_dif, time_next, is, js)
+    if (ididir .gt. 0) flag = send_data(ididir, surface%asfc_nir_dir, time_next, is, js)
+    if (ididif .gt. 0) flag = send_data(ididif, surface%asfc_nir_dif, time_next, is, js)
 
-
-
-
+    if (idsolarfact  .gt. 0) flag = send_data(idsolarfact, Astro%solar  , time_next, is, js)
+    if (idzen        .gt. 0) flag = send_data(idzen      , Astro%cosz   , time_next, is, js)
+    if (idfrac       .gt. 0) flag = send_data(idfrac     , Astro%fracday, time_next, is, js)
+    
+    !1D
+    if (idsolar .gt. 0) flag = send_data(idsolar, solar_constant_used,  time_next)
+    if (ider    .gt. 0) flag = send_data(ider   , Astro%rrsun ,         time_next)
 !-------------------------------------------------------------------
 !    on all timesteps, call update_rad_fields to update the temperature 
 !    tendency and define the fluxes needed by other component models.
@@ -2371,7 +2393,6 @@ if (do_rad_NN .and. do_rad) then
       call update_rad_fields (is, ie, js, je, Time_next, Astro, &
                               Astro_phys, Rad_control, &
                               Sw_output, Rad_output, flux_ratio)
-                                
 
 !-------------------------------------------------------------------
 !    call produce_radiation_diagnostics to produce radiation 
@@ -4869,12 +4890,13 @@ subroutine nn_pred_1d_matmul(FNN,x,y)
     end do
     y = interm1
     deallocate(interm1)
+end subroutine nn_pred_1d_matmul
 !######################################################################
 ! cgw: subroutine to apply NN 
 !      only consider ozone and cloud, no aerosol and other GHGs for now
 !
 !
-subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, &
+subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro, solar_constant_used, &
                               asfc_vis_dir, asfc_nir_dir, asfc_vis_dif, asfc_nir_dif, &
                               moist_clouds_block, &
                               tdt_sw, tdt_lw, &
@@ -4890,7 +4912,8 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
                                                             tflux, rh2o
     real, dimension(:,:),         intent(in)             :: tsfc
     type(radiative_gases_type),   intent(in)             :: Rad_gases
-    real, dimension(:,:),         intent(in)             :: cosz
+    type(astronomy_type),         intent(in)             :: Astro
+    real,                         intent(in)             :: solar_constant_used
     real, dimension(:,:),         intent(in)             :: asfc_vis_dir, &
                                                             asfc_nir_dir, &
                                                             asfc_vis_dif, &
@@ -4904,11 +4927,13 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
                                                             swup_toa_clr, olr_clr
     !---------------------------------------------------------------------
     ! local variables
-    integer :: i, j, isize, jsize, ksize, outunit
+    integer :: i, j, isize, jsize, ksize, outunit, inn, cstra, cconv
     real(kind=real32), allocatable, dimension(:) :: input_X, output_Y
     isize = size(temp,1)
     jsize = size(temp,2)
     ksize = size(temp,3)
+    cstra = Moist_clouds_block%index_strat
+    cconv = Moist_clouds_block%index_uw_conv
     ! diag, can be deleted
     if (nn_diag_flag) then
         outunit = stdout()
@@ -4924,9 +4949,28 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
     ! loop over all locations, might be faster if do in all location
     ! need to optimize/test in next dev
     ! v0: for lwcs, input_X(102) , this will be change in the future version
-    
-    allocate(input_X(size(Rad_NN_FC%layers(1)%weight,1)))
-    allocate(output_y(size(Rad_NN_FC%layers(Rad_NN_FC%num_layers)%bias)))
+    inn = 1 
+    allocate(input_X(size(Rad_NN_FC(inn)%layers(1)%weight,1)))
+    allocate(output_y(size(Rad_NN_FC(inn)%layers(Rad_NN_FC(inn)%num_layers)%bias)))
+    do j = 1, jsize
+        do i = 1, isize
+            input_X(1) = pflux(i,j,ksize+1)   ! ps
+            input_X(2:2+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+            input_X(3+ksize)   = tsfc(i,j)
+            input_X(4+ksize:3+2*ksize) = rh2o(i,j,:)
+            input_X(4+2*ksize:3+3*ksize) = Rad_gases%qo3(i,j,:)
+            call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
+            lwdn_sfc_clr(i,j) = output_Y(1) 
+            lwup_sfc(i,j)     = output_Y(2) 
+            olr_clr(i,j)      = output_Y(3) 
+            tdt_lw_clr(i,j,:) = output_Y(4:) 
+        end do
+    end do
+    deallocate(input_X, output_Y)
+    ! v0.1: for lw, input_X(3xx) , this will be change in the future version
+    inn = 2
+    allocate(input_X(size(Rad_NN_FC(inn)%layers(1)%weight,1)))
+    allocate(output_y(size(Rad_NN_FC(inn)%layers(Rad_NN_FC(inn)%num_layers)%bias)))
     do j = 1, jsize
         do i = 1, isize
             input_X(1) = pflux(i,j,ksize+1)   ! ps
@@ -4934,18 +4978,81 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, cosz, 
             input_X(3+ksize) = tsfc(i,j)
             input_X(4+ksize:3+2*ksize) = rh2o(i,j,:)
             input_X(4+2*ksize:3+3*ksize) = Rad_gases%qo3(i,j,:)
-            !call Rad_NN_pred_1d(Rad_NN_FC, input_X, output_Y)
-            if (nn_diag_speed) then
-                call NN_pred_1d_matmul(Rad_NN_FC, input_X, output_Y)
-            else
-                call NN_pred_1d_sgemm (Rad_NN_FC, input_X, output_Y)
-            end if 
-            lwdn_sfc_clr(i,j) = output_Y(1) 
+            input_X(4+3*ksize:3+4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+            input_X(4+4*ksize:3+5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+            input_X(4+5*ksize:3+6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+            input_X(4+6*ksize:3+7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            input_X(4+7*ksize:3+8*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+            input_X(4+8*ksize:3+9*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+            input_X(4+9*ksize:3+10*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+            input_X(4+10*ksize:3+11*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
+            lwdn_sfc(i,j) = output_Y(1) 
             lwup_sfc(i,j)     = output_Y(2) 
-            olr_clr(i,j)      = output_Y(3) 
-            tdt_lw_clr(i,j,:) = output_Y(4:) 
+            olr(i,j)      = output_Y(3) 
+            tdt_lw(i,j,:) = output_Y(4:) 
         end do
     end do
+    deallocate(input_X, output_Y)
+    ! v0.2: for swcs, input_X(1xx) , this will be change in the future version
+    inn = 3
+    allocate(input_X(size(Rad_NN_FC(inn)%layers(1)%weight,1)))
+    allocate(output_y(size(Rad_NN_FC(inn)%layers(Rad_NN_FC(inn)%num_layers)%bias)))
+    do j = 1, jsize
+        do i = 1, isize
+            input_X(1) = pflux(i,j,ksize+1)   ! ps
+            input_X(2) = solar_constant_used*Astro%solar(i,j)   ! rsdt
+            input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+            input_X(4+ksize) = tsfc(i,j)
+            input_X(5+ksize:4+2*ksize) = rh2o(i,j,:)
+            input_X(5+2*ksize:4+3*ksize) = Rad_gases%qo3(i,j,:)
+            input_X(5+3*ksize) = Astro%cosz(i,j)
+            input_X(6+3*ksize) = asfc_vis_dir(i,j)
+            input_X(7+3*ksize) = asfc_vis_dif(i,j)
+            input_X(8+3*ksize) = asfc_nir_dir(i,j)
+            input_X(9+3*ksize) = asfc_nir_dif(i,j)
+            call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
+            swdn_toa(i,j) = input_X(2)
+            swup_toa_clr(i,j) = output_Y(1) 
+            swdn_sfc_clr(i,j) = output_Y(2) 
+            swup_sfc_clr(i,j) = output_Y(3) 
+            tdt_sw_clr(i,j,:) = output_Y(4:) 
+        end do
+    end do
+    deallocate(input_X, output_Y)
+    ! v0.3: for sw, input_X(3xx) , this will be change in the future version
+    inn = 4
+    allocate(input_X(size(Rad_NN_FC(inn)%layers(1)%weight,1)))
+    allocate(output_y(size(Rad_NN_FC(inn)%layers(Rad_NN_FC(inn)%num_layers)%bias)))
+    do j = 1, jsize
+        do i = 1, isize
+            input_X(1) = pflux(i,j,ksize+1)   ! ps
+            input_X(2) = swdn_toa(i,j)        ! rsdt
+            input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+            input_X(4+ksize) = tsfc(i,j)
+            input_X(5+ksize:4+2*ksize) = rh2o(i,j,:)
+            input_X(5+2*ksize:4+3*ksize) = Rad_gases%qo3(i,j,:)
+            input_X(5+3*ksize) = Astro%cosz(i,j)
+            input_X(6+3*ksize) = asfc_vis_dir(i,j)
+            input_X(7+3*ksize) = asfc_vis_dif(i,j)
+            input_X(8+3*ksize) = asfc_nir_dir(i,j)
+            input_X(9+3*ksize) = asfc_nir_dif(i,j)
+            input_X(10+3*ksize:9+4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+            input_X(10+4*ksize:9+5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+            input_X(10+5*ksize:9+6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+            input_X(10+6*ksize:9+7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            input_X(10+7*ksize:9+8*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+            input_X(10+8*ksize:9+9*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+            input_X(10+9*ksize:9+10*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+            input_X(10+10*ksize:9+11*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
+            swup_toa(i,j) = output_Y(1) 
+            swdn_sfc(i,j) = output_Y(2) 
+            swup_sfc(i,j) = output_Y(3) 
+            tdt_sw(i,j,:) = output_Y(4:) 
+        end do
+    end do
+    deallocate(input_X, output_Y)
     
 end subroutine NN_radiation_calc
 
