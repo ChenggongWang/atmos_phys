@@ -4894,7 +4894,7 @@ end subroutine nn_pred_1d_matmul
 !
 !
 subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro, solar_constant_used, &
-                              asfc_vis_dir, asfc_nir_dir, asfc_vis_dif, asfc_nir_dif, &
+                              asfc_vis_dir, asfc_vis_dif, asfc_nir_dir, asfc_nir_dif, &
                               moist_clouds_block, &
                               tdt_sw, tdt_lw, &
                               lwdn_sfc, lwup_sfc, swdn_sfc, swup_sfc,  &
