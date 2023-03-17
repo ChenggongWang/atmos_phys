@@ -2340,48 +2340,50 @@ integer :: irepeat
         if (allocated(nn_swup_toa_clr)) deallocate(nn_swup_toa_clr)
         if (allocated(nn_olr_clr     )) deallocate(nn_olr_clr     )
     endif ! do_rad_nn
-    ! send_data to diag files
-    !3D atmosphere fields.
-    if (idtlev .gt. 0) flag = send_data(idtlev, atmos_input%tflux, time_next, is, js, 1)
-    if (idtlay .gt. 0) flag = send_data(idtlay, atmos_input%temp,  time_next, is, js, 1)
-    if (idzlay .gt. 0) flag = send_data(idzlay, atmos_input%deltaz,time_next, is, js, 1)
-    if (idh2o  .gt. 0) flag = send_data(idh2o,  atmos_input%rh2o,  time_next, is, js, 1)
-    if (ido3   .gt. 0) flag = send_data(ido3,   rad_gases%qo3,     time_next, is, js, 1)
+    if (do_rad) then
+        ! send_data to diag files
+        !3D atmosphere fields.
+        if (idtlev .gt. 0) flag = send_data(idtlev, atmos_input%tflux, time_next, is, js, 1)
+        if (idtlay .gt. 0) flag = send_data(idtlay, atmos_input%temp,  time_next, is, js, 1)
+        if (idzlay .gt. 0) flag = send_data(idzlay, atmos_input%deltaz,time_next, is, js, 1)
+        if (idh2o  .gt. 0) flag = send_data(idh2o,  atmos_input%rh2o,  time_next, is, js, 1)
+        if (ido3   .gt. 0) flag = send_data(ido3,   rad_gases%qo3,     time_next, is, js, 1)
 
-    !Clouds
-    n = moist_clouds_block%index_strat
-    if (idsd .gt. 0) flag = send_data(idsd, moist_clouds_block%cloud_data(n)%droplet_number, &
-                                      time_next, is, js, 1)
-    if (idsf .gt. 0) flag = send_data(idsf, moist_clouds_block%cloud_data(n)%cloud_area, &
-                                      time_next, is, js, 1)
-    if (idsl .gt. 0) flag = send_data(idsl, moist_clouds_block%cloud_data(n)%liquid_amt, &
-                                      time_next, is, js, 1)
-    if (idsi .gt. 0) flag = send_data(idsi, moist_clouds_block%cloud_data(n)%ice_amt, &
-                                      time_next, is, js, 1) 
-    n = moist_clouds_block%index_uw_conv
-    if (idcd .gt. 0) flag = send_data(idcd, moist_clouds_block%cloud_data(n)%droplet_number, &
-                                      time_next, is, js, 1)
-    if (idcf .gt. 0) flag = send_data(idcf, moist_clouds_block%cloud_data(n)%cloud_area, &
-                                      time_next, is, js, 1)
-    if (idcl .gt. 0) flag = send_data(idcl, moist_clouds_block%cloud_data(n)%liquid_amt, &
-                                      time_next, is, js, 1)
-    if (idci .gt. 0) flag = send_data(idci, moist_clouds_block%cloud_data(n)%ice_amt, &
-                                      time_next, is, js, 1)
-    !2D atmosphere fields.
-    if (idps   .gt. 0) flag = send_data(idps,   atmos_input%psfc,     time_next, is, js)
-    if (idts   .gt. 0) flag = send_data(idts,   atmos_input%tsfc,     time_next, is, js)
-    if (idvdir .gt. 0) flag = send_data(idvdir, surface%asfc_vis_dir, time_next, is, js)
-    if (idvdif .gt. 0) flag = send_data(idvdif, surface%asfc_vis_dif, time_next, is, js)
-    if (ididir .gt. 0) flag = send_data(ididir, surface%asfc_nir_dir, time_next, is, js)
-    if (ididif .gt. 0) flag = send_data(ididif, surface%asfc_nir_dif, time_next, is, js)
+        !Clouds
+        n = moist_clouds_block%index_strat
+        if (idsd .gt. 0) flag = send_data(idsd, moist_clouds_block%cloud_data(n)%droplet_number, &
+                                          time_next, is, js, 1)
+        if (idsf .gt. 0) flag = send_data(idsf, moist_clouds_block%cloud_data(n)%cloud_area, &
+                                          time_next, is, js, 1)
+        if (idsl .gt. 0) flag = send_data(idsl, moist_clouds_block%cloud_data(n)%liquid_amt, &
+                                          time_next, is, js, 1)
+        if (idsi .gt. 0) flag = send_data(idsi, moist_clouds_block%cloud_data(n)%ice_amt, &
+                                          time_next, is, js, 1) 
+        n = moist_clouds_block%index_uw_conv
+        if (idcd .gt. 0) flag = send_data(idcd, moist_clouds_block%cloud_data(n)%droplet_number, &
+                                          time_next, is, js, 1)
+        if (idcf .gt. 0) flag = send_data(idcf, moist_clouds_block%cloud_data(n)%cloud_area, &
+                                          time_next, is, js, 1)
+        if (idcl .gt. 0) flag = send_data(idcl, moist_clouds_block%cloud_data(n)%liquid_amt, &
+                                          time_next, is, js, 1)
+        if (idci .gt. 0) flag = send_data(idci, moist_clouds_block%cloud_data(n)%ice_amt, &
+                                          time_next, is, js, 1)
+        !2D atmosphere fields.
+        if (idps   .gt. 0) flag = send_data(idps,   atmos_input%psfc,     time_next, is, js)
+        if (idts   .gt. 0) flag = send_data(idts,   atmos_input%tsfc,     time_next, is, js)
+        if (idvdir .gt. 0) flag = send_data(idvdir, surface%asfc_vis_dir, time_next, is, js)
+        if (idvdif .gt. 0) flag = send_data(idvdif, surface%asfc_vis_dif, time_next, is, js)
+        if (ididir .gt. 0) flag = send_data(ididir, surface%asfc_nir_dir, time_next, is, js)
+        if (ididif .gt. 0) flag = send_data(ididif, surface%asfc_nir_dif, time_next, is, js)
 
-    if (idsolarfact  .gt. 0) flag = send_data(idsolarfact, Astro%solar  , time_next, is, js)
-    if (idzen        .gt. 0) flag = send_data(idzen      , Astro%cosz   , time_next, is, js)
-    if (idfrac       .gt. 0) flag = send_data(idfrac     , Astro%fracday, time_next, is, js)
-    
-    !1D
-    if (idsolar .gt. 0) flag = send_data(idsolar, solar_constant_used,  time_next)
-    if (ider    .gt. 0) flag = send_data(ider   , Astro%rrsun ,         time_next)
+        if (idsolarfact  .gt. 0) flag = send_data(idsolarfact, Astro%solar  , time_next, is, js)
+        if (idzen        .gt. 0) flag = send_data(idzen      , Astro%cosz   , time_next, is, js)
+        if (idfrac       .gt. 0) flag = send_data(idfrac     , Astro%fracday, time_next, is, js)
+        
+        !1D
+        if (idsolar .gt. 0) flag = send_data(idsolar, solar_constant_used,  time_next)
+        if (ider    .gt. 0) flag = send_data(ider   , Astro%rrsun ,         time_next)
+    endif ! do_rad
 !-------------------------------------------------------------------
 !    on all timesteps, call update_rad_fields to update the temperature 
 !    tendency and define the fluxes needed by other component models.
@@ -4827,11 +4829,6 @@ end subroutine radiation_calc
 real elemental function NN_activ(x)
     real(kind=real32), intent(in) :: x
     ! ReLU:
-    !if (x>0) then
-    !    NN_activ = x
-    !else
-    !    NN_activ = 0
-    !end if
     NN_activ = max(0.0,x)
     ! tanh
     ! y = tanh(x)
@@ -4939,13 +4936,6 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
         outunit = stdout()
         write(outunit, *) 'nn batch size: ', isize, jsize, ksize
     end if
-    tdt_sw = 1.0
-    tdt_lw = 1.0
-    tdt_sw_clr = 0.0
-    tdt_lw_clr = 0.0
-    lwup_sfc = 0.0
-    olr_clr = 0.0
-    lwdn_sfc_clr = 0.0
     ! loop over all locations, might be faster if do in all location
     ! need to optimize/test in next dev
     ! v0: for lwcs, input_X(102) , this will be change in the future version
@@ -4977,15 +4967,15 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
             input_X(2:2+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
             input_X(3+ksize) = tsfc(i,j)
             input_X(4+ksize:3+2*ksize) = rh2o(i,j,:)
-            input_X(4+2*ksize:3+3*ksize) = Rad_gases%qo3(i,j,:)
-            input_X(4+3*ksize:3+4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
-            input_X(4+4*ksize:3+5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
-            input_X(4+5*ksize:3+6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
-            input_X(4+6*ksize:3+7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
-            input_X(4+7*ksize:3+8*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
-            input_X(4+8*ksize:3+9*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
-            input_X(4+9*ksize:3+10*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
-            input_X(4+10*ksize:3+11*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            input_X(4+ 2*ksize:3+ 3*ksize) = Rad_gases%qo3(i,j,:)
+            input_X(4+ 3*ksize:3+ 4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+            input_X(4+ 4*ksize:3+ 5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+            input_X(4+ 5*ksize:3+ 6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+            input_X(4+ 6*ksize:3+ 7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            input_X(4+ 7*ksize:3+ 8*ksize) = Moist_clouds_block%cloud_data(cconv)%droplet_number(i,j,:)
+            input_X(4+ 8*ksize:3+ 9*ksize) = Moist_clouds_block%cloud_data(cconv)%cloud_area(i,j,:)
+            input_X(4+ 9*ksize:3+10*ksize) = Moist_clouds_block%cloud_data(cconv)%liquid_amt(i,j,:)
+            input_X(4+10*ksize:3+11*ksize) = Moist_clouds_block%cloud_data(cconv)%ice_amt(i,j,:)
             call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
             lwdn_sfc(i,j) = output_Y(1) 
             lwup_sfc(i,j)     = output_Y(2) 
@@ -5037,14 +5027,14 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
             input_X(7+3*ksize) = asfc_vis_dif(i,j)
             input_X(8+3*ksize) = asfc_nir_dir(i,j)
             input_X(9+3*ksize) = asfc_nir_dif(i,j)
-            input_X(10+3*ksize:9+4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
-            input_X(10+4*ksize:9+5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
-            input_X(10+5*ksize:9+6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
-            input_X(10+6*ksize:9+7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
-            input_X(10+7*ksize:9+8*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
-            input_X(10+8*ksize:9+9*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
-            input_X(10+9*ksize:9+10*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
-            input_X(10+10*ksize:9+11*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            input_X(10+ 3*ksize:9+ 4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+            input_X(10+ 4*ksize:9+ 5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+            input_X(10+ 5*ksize:9+ 6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+            input_X(10+ 6*ksize:9+ 7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+            input_X(10+ 7*ksize:9+ 8*ksize) = Moist_clouds_block%cloud_data(cconv)%droplet_number(i,j,:)
+            input_X(10+ 8*ksize:9+ 9*ksize) = Moist_clouds_block%cloud_data(cconv)%cloud_area(i,j,:)
+            input_X(10+ 9*ksize:9+10*ksize) = Moist_clouds_block%cloud_data(cconv)%liquid_amt(i,j,:)
+            input_X(10+10*ksize:9+11*ksize) = Moist_clouds_block%cloud_data(cconv)%ice_amt(i,j,:)
             call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
             swup_toa(i,j) = output_Y(1) 
             swdn_sfc(i,j) = output_Y(2) 
