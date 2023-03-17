@@ -4992,21 +4992,28 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
         do i = 1, isize
             input_X(1) = pflux(i,j,ksize+1)   ! ps
             input_X(2) = solar_constant_used*Astro%solar(i,j)   ! rsdt
-            input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
-            input_X(4+ksize) = tsfc(i,j)
-            input_X(5+ksize:4+2*ksize) = rh2o(i,j,:)
-            input_X(5+2*ksize:4+3*ksize) = Rad_gases%qo3(i,j,:)
-            input_X(5+3*ksize) = Astro%cosz(i,j)
-            input_X(6+3*ksize) = asfc_vis_dir(i,j)
-            input_X(7+3*ksize) = asfc_vis_dif(i,j)
-            input_X(8+3*ksize) = asfc_nir_dir(i,j)
-            input_X(9+3*ksize) = asfc_nir_dif(i,j)
-            call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
             swdn_toa(i,j) = input_X(2)
-            swup_toa_clr(i,j) = output_Y(1) 
-            swdn_sfc_clr(i,j) = output_Y(2) 
-            swup_sfc_clr(i,j) = output_Y(3) 
-            tdt_sw_clr(i,j,:) = output_Y(4:) 
+            if (swdn_toa(i,j) > 1e-3) then !daylight
+                input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+                input_X(4+ksize) = tsfc(i,j)
+                input_X(5+ksize:4+2*ksize) = rh2o(i,j,:)
+                input_X(5+2*ksize:4+3*ksize) = Rad_gases%qo3(i,j,:)
+                input_X(5+3*ksize) = Astro%cosz(i,j)
+                input_X(6+3*ksize) = asfc_vis_dir(i,j)
+                input_X(7+3*ksize) = asfc_vis_dif(i,j)
+                input_X(8+3*ksize) = asfc_nir_dir(i,j)
+                input_X(9+3*ksize) = asfc_nir_dif(i,j)
+                call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
+                swup_toa_clr(i,j) = output_Y(1) 
+                swdn_sfc_clr(i,j) = output_Y(2) 
+                swup_sfc_clr(i,j) = output_Y(3) 
+                tdt_sw_clr(i,j,:) = output_Y(4:) 
+            else
+                swup_toa_clr(i,j) = 0.0
+                swdn_sfc_clr(i,j) = 0.0
+                swup_sfc_clr(i,j) = 0.0
+                tdt_sw_clr(i,j,:) = 0.0 
+            endif
         end do
     end do
     deallocate(input_X, output_Y)
@@ -5018,28 +5025,36 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
         do i = 1, isize
             input_X(1) = pflux(i,j,ksize+1)   ! ps
             input_X(2) = swdn_toa(i,j)        ! rsdt
-            input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
-            input_X(4+ksize) = tsfc(i,j)
-            input_X(5+ksize:4+2*ksize) = rh2o(i,j,:)
-            input_X(5+2*ksize:4+3*ksize) = Rad_gases%qo3(i,j,:)
-            input_X(5+3*ksize) = Astro%cosz(i,j)
-            input_X(6+3*ksize) = asfc_vis_dir(i,j)
-            input_X(7+3*ksize) = asfc_vis_dif(i,j)
-            input_X(8+3*ksize) = asfc_nir_dir(i,j)
-            input_X(9+3*ksize) = asfc_nir_dif(i,j)
-            input_X(10+ 3*ksize:9+ 4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
-            input_X(10+ 4*ksize:9+ 5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
-            input_X(10+ 5*ksize:9+ 6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
-            input_X(10+ 6*ksize:9+ 7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
-            input_X(10+ 7*ksize:9+ 8*ksize) = Moist_clouds_block%cloud_data(cconv)%droplet_number(i,j,:)
-            input_X(10+ 8*ksize:9+ 9*ksize) = Moist_clouds_block%cloud_data(cconv)%cloud_area(i,j,:)
-            input_X(10+ 9*ksize:9+10*ksize) = Moist_clouds_block%cloud_data(cconv)%liquid_amt(i,j,:)
-            input_X(10+10*ksize:9+11*ksize) = Moist_clouds_block%cloud_data(cconv)%ice_amt(i,j,:)
-            call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
-            swup_toa(i,j) = output_Y(1) 
-            swdn_sfc(i,j) = output_Y(2) 
-            swup_sfc(i,j) = output_Y(3) 
-            tdt_sw(i,j,:) = output_Y(4:) 
+            swdn_toa(i,j) = input_X(2)
+            if (swdn_toa(i,j) > 1e-3) then !daylight
+                input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
+                input_X(4+ksize) = tsfc(i,j)
+                input_X(5+ksize:4+2*ksize) = rh2o(i,j,:)
+                input_X(5+2*ksize:4+3*ksize) = Rad_gases%qo3(i,j,:)
+                input_X(5+3*ksize) = Astro%cosz(i,j)
+                input_X(6+3*ksize) = asfc_vis_dir(i,j)
+                input_X(7+3*ksize) = asfc_vis_dif(i,j)
+                input_X(8+3*ksize) = asfc_nir_dir(i,j)
+                input_X(9+3*ksize) = asfc_nir_dif(i,j)
+                input_X(10+ 3*ksize:9+ 4*ksize) = Moist_clouds_block%cloud_data(cstra)%droplet_number(i,j,:)
+                input_X(10+ 4*ksize:9+ 5*ksize) = Moist_clouds_block%cloud_data(cstra)%cloud_area(i,j,:)
+                input_X(10+ 5*ksize:9+ 6*ksize) = Moist_clouds_block%cloud_data(cstra)%liquid_amt(i,j,:)
+                input_X(10+ 6*ksize:9+ 7*ksize) = Moist_clouds_block%cloud_data(cstra)%ice_amt(i,j,:)
+                input_X(10+ 7*ksize:9+ 8*ksize) = Moist_clouds_block%cloud_data(cconv)%droplet_number(i,j,:)
+                input_X(10+ 8*ksize:9+ 9*ksize) = Moist_clouds_block%cloud_data(cconv)%cloud_area(i,j,:)
+                input_X(10+ 9*ksize:9+10*ksize) = Moist_clouds_block%cloud_data(cconv)%liquid_amt(i,j,:)
+                input_X(10+10*ksize:9+11*ksize) = Moist_clouds_block%cloud_data(cconv)%ice_amt(i,j,:)
+                call NN_pred_1d_sgemm (Rad_NN_FC(inn), input_X, output_Y)
+                swup_toa(i,j) = output_Y(1) 
+                swdn_sfc(i,j) = output_Y(2) 
+                swup_sfc(i,j) = output_Y(3) 
+                tdt_sw(i,j,:) = output_Y(4:) 
+            else
+                swup_toa(i,j) = 0.0
+                swdn_sfc(i,j) = 0.0
+                swup_sfc(i,j) = 0.0
+                tdt_sw(i,j,:) = 0.0 
+            endif
         end do
     end do
     deallocate(input_X, output_Y)
