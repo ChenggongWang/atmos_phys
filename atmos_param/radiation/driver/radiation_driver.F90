@@ -36,7 +36,6 @@
 !!</BUG>
 !! </INFO>
 !    shared modules:
-use, intrinsic :: iso_fortran_env, only: real32
 
 use block_control_mod,     only: block_control_type
 use mpp_mod,               only: input_nml_file, mpp_get_current_pelist
@@ -549,8 +548,8 @@ end type radiation_diag_type
 !----------------------------------------------------------------------
 public NN_Linear_layer_type
 type :: NN_Linear_layer_type 
-    real(kind=real32), dimension(:,:), pointer :: weight=>NULL()
-    real(kind=real32), dimension(:),   pointer :: bias=>NULL()
+    real(kind=4), dimension(:,:), pointer :: weight=>NULL()
+    real(kind=4), dimension(:),   pointer :: bias=>NULL()
 end type NN_Linear_layer_type
 public NN_FC_type
 type :: NN_FC_type
@@ -4827,7 +4826,7 @@ end subroutine radiation_calc
 ! cgw: function and subroutine for an NN to predict
 ! NN activation function
 real elemental function NN_activ(x)
-    real(kind=real32), intent(in) :: x
+    real(kind=4), intent(in) :: x
     ! ReLU:
     NN_activ = max(0.0,x)
     ! tanh
@@ -4835,14 +4834,14 @@ real elemental function NN_activ(x)
 end function NN_activ
 subroutine nn_pred_1d_sgemm(FNN,x,y)
     type(NN_FC_type),   intent(in)    :: FNN
-    real(kind=real32), dimension(:), intent(in)    :: x
-    real(kind=real32), dimension(:), intent(inout) :: y
+    real(kind=4), dimension(:), intent(in)    :: x
+    real(kind=4), dimension(:), intent(inout) :: y
     ! local
     integer :: ilayer
-    real(kind=real32), dimension(:), allocatable :: interm1, interm2
+    real(kind=4), dimension(:), allocatable :: interm1, interm2
     ! for sgemm
     integer :: m, k, n
-    real(kind=real32) :: alpha, beta
+    real(kind=4) :: alpha, beta
     alpha = 1.0
     beta = 1.0
 
@@ -4868,9 +4867,9 @@ end subroutine nn_pred_1d_sgemm
 
 subroutine nn_pred_1d_matmul(FNN,x,y)
     type(NN_FC_type),   intent(in) :: FNN
-    real(kind=real32), dimension(:), intent(in) :: x
-    real(kind=real32), dimension(:), intent(inout) :: y
-    real(kind=real32), dimension(:), allocatable :: interm1, interm2
+    real(kind=4), dimension(:), intent(in) :: x
+    real(kind=4), dimension(:), intent(inout) :: y
+    real(kind=4), dimension(:), allocatable :: interm1, interm2
     integer :: ilayer, n
     allocate(interm1(size(x)))
     interm1 = x
@@ -4925,7 +4924,7 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
     !---------------------------------------------------------------------
     ! local variables
     integer :: i, j, isize, jsize, ksize, outunit, inn, cstra, cconv
-    real(kind=real32), allocatable, dimension(:) :: input_X, output_Y
+    real(kind=4), allocatable, dimension(:) :: input_X, output_Y
     isize = size(temp,1)
     jsize = size(temp,2)
     ksize = size(temp,3)
