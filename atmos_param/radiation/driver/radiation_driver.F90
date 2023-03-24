@@ -789,6 +789,7 @@ integer :: idtlev, idplay, idtlay, idh2o, ido3, idzlay, idsd, &
            id_nn_tdt_lw, id_nn_tdt_sw, &
            id_nn_lwdn_sfc, id_nn_lwup_sfc, id_nn_swdn_sfc, id_nn_swup_sfc, &
            id_nn_swdn_toa, id_nn_swup_toa, id_nn_olr, &
+           id_v3_swdn_toa, id_v4_swdn_toa, id_v5_swdn_toa,&
            id_nn_tdt_lw_clr,id_nn_tdt_sw_clr, &
            id_nn_lwdn_sfc_clr, id_nn_swdn_sfc_clr, id_nn_swup_sfc_clr, &
            id_nn_swup_toa_clr, id_nn_olr_clr 
@@ -1595,6 +1596,9 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
         id_nn_swdn_sfc = register_diag_field(mod_name, "nn_swdn_sfc", a(1:2), time,  "nn_swdn_sfc", "Wm-2")
         id_nn_swup_sfc = register_diag_field(mod_name, "nn_swup_sfc", a(1:2), time,  "nn_swup_sfc", "Wm-2")
         id_nn_swdn_toa = register_diag_field(mod_name, "nn_swdn_toa", a(1:2), time,  "nn_swdn_toa", "Wm-2")
+        id_v3_swdn_toa = register_diag_field(mod_name, "v3_swdn_toa", a(1:2), time,  "v4_swdn_toa", "Wm-2")
+        id_v4_swdn_toa = register_diag_field(mod_name, "v4_swdn_toa", a(1:2), time,  "v4_swdn_toa", "Wm-2")
+        id_v5_swdn_toa = register_diag_field(mod_name, "v5_swdn_toa", a(1:2), time,  "v5_swdn_toa", "Wm-2")
         id_nn_swup_toa = register_diag_field(mod_name, "nn_swup_toa", a(1:2), time,  "nn_swup_toa", "Wm-2")
         id_nn_olr      = register_diag_field(mod_name, "nn_olr", a(1:2), time,  "nn_olr", "Wm-2")
         id_nn_lwdn_sfc_clr = register_diag_field(mod_name, "nn_lwdn_sfc_clr", a(1:2), time,  "nn_lwdn_sfc_clr", "Wm-2")
@@ -2064,6 +2068,7 @@ real    :: solar_constant_used
 logical :: flag            
 integer :: n 
 integer :: irepeat 
+character(len=32) :: fmt_str
 
 !-------------------------------------------------------------------
 !    verify that this module has been initialized. if not, exit.
@@ -2311,7 +2316,8 @@ integer :: irepeat
         if (id_nn_lwup_sfc .gt. 0) flag = send_data(id_nn_lwup_sfc, nn_lwup_sfc, time_next, is, js)
         if (id_nn_swdn_sfc .gt. 0) flag = send_data(id_nn_swdn_sfc, nn_swdn_sfc, time_next, is, js)
         if (id_nn_swup_sfc .gt. 0) flag = send_data(id_nn_swup_sfc, nn_swup_sfc, time_next, is, js)
-        if (id_nn_swdn_toa .gt. 0) flag = send_data(id_nn_swdn_toa, nn_swdn_toa, time_next, is, js)
+        !if (id_nn_swdn_toa .gt. 0) flag = send_data(id_nn_swdn_toa, nn_swdn_toa, time_next, is, js)
+        if (id_nn_swdn_toa .gt. 0) flag = send_data(id_nn_swdn_toa, Sw_output(1)%dfsw(:,:,1), time_next, is, js)
         if (id_nn_swup_toa .gt. 0) flag = send_data(id_nn_swup_toa, nn_swup_toa, time_next, is, js)
         if (id_nn_olr      .gt. 0) flag = send_data(id_nn_olr     , nn_olr     , time_next, is, js)
         
@@ -2383,7 +2389,13 @@ integer :: irepeat
         !1D
         if (idsolar .gt. 0) flag = send_data(idsolar, solar_constant_used,  time_next)
         if (ider    .gt. 0) flag = send_data(ider   , Astro%rrsun ,         time_next)
+        
+        if (id_v3_swdn_toa .gt. 0) flag = send_data(id_v3_swdn_toa, Sw_output(1)%dfsw(:,:,1), time_next, is, js)
     endif ! do_rad
+    if (Rad_control%renormalize_sw_fluxes .or. Rad_control%do_sw_rad) then
+        if (id_v4_swdn_toa .gt. 0) flag = send_data(id_v4_swdn_toa, Sw_output(1)%dfsw(:,:,1), time_next, is, js)
+    end if
+    if (id_v5_swdn_toa .gt. 0) flag = send_data(id_v5_swdn_toa, Sw_output(1)%dfsw(:,:,1), time_next, is, js)
 !-------------------------------------------------------------------
 !    on all timesteps, call update_rad_fields to update the temperature 
 !    tendency and define the fluxes needed by other component models.
@@ -2395,6 +2407,8 @@ integer :: irepeat
       call update_rad_fields (is, ie, js, je, Time_next, Astro, &
                               Astro_phys, Rad_control, &
                               Sw_output, Rad_output, flux_ratio)
+      !write (fmt_str, "(A10,F2)") "renormalize_flux: ", Rad_control%renormalize_sw_fluxes
+      !call error_mesg ('radiation_driver_mod', fmt_str, NOTE)
 
 !-------------------------------------------------------------------
 !    call produce_radiation_diagnostics to produce radiation 
@@ -5008,7 +5022,7 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
                 swdn_sfc_clr(i,j) = output_Y(2) 
                 swup_sfc_clr(i,j) = output_Y(3) 
                 tdt_sw_clr(i,j,:) = output_Y(4:) 
-            else
+            else ! night
                 swup_toa_clr(i,j) = 0.0
                 swdn_sfc_clr(i,j) = 0.0
                 swup_sfc_clr(i,j) = 0.0
@@ -5025,7 +5039,6 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
         do i = 1, isize
             input_X(1) = pflux(i,j,ksize+1)   ! ps
             input_X(2) = swdn_toa(i,j)        ! rsdt
-            swdn_toa(i,j) = input_X(2)
             if (swdn_toa(i,j) > 1e-3) then !daylight
                 input_X(3:3+ksize) = tflux(i,j,:) ! need to update to temp, since tflux is from tsfc
                 input_X(4+ksize) = tsfc(i,j)
@@ -5049,7 +5062,7 @@ subroutine NN_radiation_calc (pflux, temp, tflux,  tsfc, rh2o, Rad_gases, Astro,
                 swdn_sfc(i,j) = output_Y(2) 
                 swup_sfc(i,j) = output_Y(3) 
                 tdt_sw(i,j,:) = output_Y(4:) 
-            else
+            else ! night
                 swup_toa(i,j) = 0.0
                 swdn_sfc(i,j) = 0.0
                 swup_sfc(i,j) = 0.0
