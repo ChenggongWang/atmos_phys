@@ -171,8 +171,8 @@ use radiation_driver_diag_mod, only: radiation_driver_diag_init, &
                                      update_rad_fields, &
                                      produce_radiation_diagnostics, &
                                      write_solar_interp_restart_nc
-!use radiation_driver_nn_mod,    only:   radiation_driver_nn_init, &
-!                                        test
+use radiation_driver_nn_mod,    only:   radiation_driver_nn_init, &
+                                        test
 !--------------------------------------------------------------------
 
 implicit none 
@@ -2263,7 +2263,7 @@ integer :: irepeat
 
 !   cgw: call NN_radiation_calc 
     if (do_rad_NN .and. do_rad) then
-        !call test()
+        call test()
         allocate(nn_tdt_sw_clr   (size(atmos_input%press, 1), &
                                   size(atmos_input%press, 2), &
                                   size(atmos_input%press, 3)))
