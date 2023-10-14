@@ -1,3 +1,14 @@
+# rad double call
+use the aerosol radiation call to diagnose stochastic cloud overlapping effect on flux and heating rate
+## multiple the temp. determined seed by random number
+[atmos_param/radiation/clouds/get_random_number_stream.F90#L225](https://github.com/ChenggongWang/atmos_phys/blob/main/atmos_param/radiation/clouds/get_random_number_stream.F90#L225)
+## repeat the cloud_driver and radiation_calc
+* modify atmos_param/radiation/driver/radiation_driver.F90
+* this has memory leak now! It can only run for a month but does the job for testing purpose.   
+## change namelist to run AM4
+enable aerosol double call in aerosolrad_driver_nml: do_lwaerosol_forcing, do_swaerosol_forcing
+disenable aerosol effect in aerosolrad_package_nml: do_lwaerosol, do_swaerosol
+
 # atmos_phys
 This is the repository that combines the atmosphere physics and chemistry
 ## Table of contents
