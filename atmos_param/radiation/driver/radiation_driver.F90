@@ -1776,8 +1776,10 @@ type(radiation_diag_type), intent(out),   optional :: Rad_diag
 
 
       type(astronomy_type)               :: Astro, Astro_phys
-      type(lw_output_type), dimension(Aerosolrad_control%indx_lwaf) :: Lw_output
-      type(sw_output_type), dimension(Aerosolrad_control%indx_swaf) :: Sw_output
+      type(lw_output_type), dimension(2,1) :: Lw_output21
+      type(sw_output_type), dimension(2,1) :: Sw_output21
+      type(lw_output_type), dimension(2) :: Lw_output
+      type(sw_output_type), dimension(2) :: Sw_output
       type(lw_diagnostics_type)                         :: Lw_diagnostics
       type(aerosolrad_diag_type)     :: Aerosolrad_diags
 
@@ -2042,9 +2044,49 @@ real, dimension(:,:,:,:), pointer :: r, rm
                              aeroasymfac, aerosctopdep, aeroextopdep, &
                              crndlw, cmxolw, emrndlw, emmxolw, &
                              camtsw, cldsctsw, cldextsw, cldasymmsw, &
-                             Rad_output, Lw_output, Sw_output, Lw_diagnostics)
+                             Rad_output, Lw_output21(1,:), Sw_output21(1,:), Lw_diagnostics)
+
       endif
       call mpp_clock_end (calc_clock)
+!--------------------------------------------------------------------
+!cgw: repeat rad again 
+!--------------------------------------------------------------------
+      call mpp_clock_begin (clouds_clock)
+      if (do_rad) then
+         call cloudrad_driver (is, ie, js, je,               &
+                               Time, Time_next, Rad_time,    &
+                               lat, Surface%land, Astro%cosz, &
+                               z_half, z_full, r, Atmos_input%tsfc, &
+                               Atmos_input%press, Atmos_input%pflux, &
+                               Atmos_input%temp, Atmos_input%deltaz, &
+                               Atmos_input%cloudtemp, Atmos_input%cloudvapor, &
+                               Atmos_input%clouddeltaz, &
+                               Cldrad_control, &
+                               Aerosol, Cld_spec, Model_microphys,  &
+                               Moist_clouds_block, &
+                               crndlw, cmxolw, emrndlw, emmxolw, &
+                               camtsw, cldsctsw, cldextsw, cldasymmsw )
+      endif ! (do_rad)
+      call mpp_clock_end (clouds_clock)
+      call mpp_clock_begin (calc_clock)
+      if (do_rad) then
+        call radiation_calc (is, ie, js, je, lat, lon, &
+                             Atmos_input%press, Atmos_input%pflux,  &
+                             Atmos_input%temp,  Atmos_input%tflux,  &
+                             Atmos_input%rh2o,  Atmos_input%deltaz, &
+                             Atmos_input%tsfc,  &
+                             Surface%asfc_vis_dir, Surface%asfc_nir_dir, &
+                             Surface%asfc_vis_dif, Surface%asfc_nir_dif, &
+                             Astro, Rad_gases, &
+                             aerooptdep, aerooptdep_volc, &
+                             aeroasymfac, aerosctopdep, aeroextopdep, &
+                             crndlw, cmxolw, emrndlw, emmxolw, &
+                             camtsw, cldsctsw, cldextsw, cldasymmsw, &
+                             Rad_output, Lw_output21(2,:), Sw_output21(2,:), Lw_diagnostics)
+      endif
+      call mpp_clock_end (calc_clock)
+      Lw_output(:) = Lw_output21(:,1)
+      Sw_output(:) = Sw_output21(:,1)
 
 !-------------------------------------------------------------------
 !    on all timesteps, call update_rad_fields to update the temperature 
@@ -2142,6 +2184,7 @@ real, dimension(:,:,:,:), pointer :: r, rm
 !---------------------------------------------------------------------
         call deallocate_arrays (Astro, Astro_phys,    &
                                 Sw_output, Lw_output, &
+                                Sw_output21, Lw_output21, &
                                 Lw_diagnostics, &
                                 Aerosol, Aerosolrad_diags)
 
@@ -4519,6 +4562,7 @@ end subroutine radiation_calc
 !
 subroutine deallocate_arrays (Astro, Astro_phys,  &
                               Sw_output, Lw_output, &
+                              Sw_output21, Lw_output21, &
                               Lw_diagnostics, &
                               Aerosol, Aerosolrad_diags)
 
@@ -4530,6 +4574,8 @@ subroutine deallocate_arrays (Astro, Astro_phys,  &
 type(astronomy_type),              intent(inout)  :: Astro, Astro_phys
 type(sw_output_type),dimension(:), intent(inout)  :: Sw_output
 type(lw_output_type),dimension(:), intent(inout)  :: Lw_output
+type(sw_output_type),dimension(:,:), intent(inout)  :: Sw_output21
+type(lw_output_type),dimension(:,:), intent(inout)  :: Lw_output21
 type(lw_diagnostics_type),         intent(inout)  :: Lw_diagnostics
 type(aerosol_type),                intent(inout)  :: Aerosol
 type(aerosolrad_diag_type),        intent(inout)  :: Aerosolrad_diags
@@ -4550,8 +4596,9 @@ type(aerosolrad_diag_type),        intent(inout)  :: Aerosolrad_diags
 !    deallocate the variables in Lw_output.
 !--------------------------------------------------------------------
       if (do_lw_rad) then
-        do n = 1, Aerosolrad_control%indx_lwaf
-          call Lw_output(n)%dealloc
+        do n = 1, 2
+          !call Lw_output(n)%dealloc
+          call Lw_output21(n,1)%dealloc
         end do
         call Lw_diagnostics%dealloc
       endif
@@ -4560,8 +4607,9 @@ type(aerosolrad_diag_type),        intent(inout)  :: Aerosolrad_diags
 !    deallocate the variables in Sw_output.
 !--------------------------------------------------------------------
       if (do_sw_rad) then
-        do n = 1, Aerosolrad_control%indx_swaf
-          call Sw_output(n)%dealloc
+        do n = 1, 2
+          !call Sw_output(n)%dealloc
+          call Sw_output21(n,1)%dealloc
         end do
       endif
 
