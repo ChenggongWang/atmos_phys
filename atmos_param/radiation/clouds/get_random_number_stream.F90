@@ -54,8 +54,12 @@ logical :: do_legacy_seed_generation = .false.
                                         ! time is held fixed in the 
                                         ! radiation calculation.
 
+!cgw : make sure double call has different results
+logical :: extra_rand_for_double_call = .false.
+
 namelist /random_number_streams_nml/ do_legacy_seed_generation, &
-                                     force_use_of_temp_for_seed
+                                     force_use_of_temp_for_seed, &
+                                     extra_rand_for_double_call
 
 !---------------------------------------------------------------------
 !----  private data -------
@@ -218,11 +222,21 @@ integer,                  intent(in),  optional       :: perm
 integer :: i, j
 real    :: seedwts(8) = (/3000.,1000.,300.,100.,30.,10.,3.,1./)
 
+! cgw: for double call
+real :: rand_num ! a random number
+
+if (extra_rand_for_double_call) then
+    call random_seed()
+    call random_number(rand_num)
+else
+    rand_num = 1.0
+endif
+
       if (use_temp_for_seed) then
         do j = 1, size(streams,2)
           do i = 1, size(streams,1)
             streams(i,j) = initializeRandomNumberStream(  &
-                               ishftc(nint(temp(i,j)*seedwts),perm))
+                               ishftc(nint(temp(i,j)*seedwts*rand_num),perm))
 
           enddo
         enddo
