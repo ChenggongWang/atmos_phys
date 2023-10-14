@@ -295,7 +295,8 @@ integer, dimension(2)        :: id_swtoa, id_swsfc,               &
                                 id_swdn_sfc_ad,                   &
                                 id_swup_sfc_ad,                   &
                                 id_swup_toa_ad,                   &
-                                id_olr_ad, id_lwsfc_ad
+                                id_olr_ad, id_lwdnsfc_ad,           &
+                                id_tdt_sw_ad,   id_tdt_lw_ad
 
 ! globally averaged diagnostics
 integer :: id_rlut_g, id_rlutcs_g, id_rsut_g, id_rsutcs_g, id_rsdt_g
@@ -1052,6 +1053,11 @@ logical,         intent(in) :: do_lwaerosol
                    trim(swaer_prep) // ' aerosol', &
                  'watts/m2', missing_value=missing_value, &
                   interp_method='conserve_order1')
+        id_tdt_sw_ad(i) = register_diag_field (mod_name,   &
+                'tdt_sw_ad'//trim(clr), axes(1:3), Time, & 
+                trim(clr2)//'temperature tendency for SW radiation' // &
+                   trim(swaer_prep) // ' aerosol', &
+                'deg_K/sec', missing_value=missing_value) 
  
          id_olr_ad(i) = register_diag_field (mod_name,    &
                   'lwtoa_ad'//trim(clr), axes(1:2), Time, &
@@ -1059,11 +1065,16 @@ logical,         intent(in) :: do_lwaerosol
                    trim(lwaer_prep) // ' aerosol', &
                   'watts/m2', missing_value=missing_value)
 
-         id_lwsfc_ad(i) = register_diag_field (mod_name,    &
-                  'lwsfc_ad'//trim(clr), axes(1:2), Time, &
-                  trim(clr2)//' Net LW flux at surface  ' //   &
+         id_lwdnsfc_ad(i) = register_diag_field (mod_name,    &
+                  'lwdnsfc_ad'//trim(clr), axes(1:2), Time, &
+                  trim(clr2)//' LW flux down at surface  ' //   &
                    trim(lwaer_prep) // ' aerosol', &
                  'watts/m2', missing_value=missing_value)
+        id_tdt_lw_ad(i) = register_diag_field (mod_name,    &
+                'tdt_lw_ad'//trim(clr), axes(1:3), Time, &
+                trim(clr2)//'temperature tendency for LW radiation' // &
+                   trim(lwaer_prep) // ' aerosol', &
+                'deg_K/sec', missing_value=missing_value)
  
        end do
 
@@ -1706,6 +1717,7 @@ type(sw_output_type), dimension(:), intent(in), optional :: Sw_output
 
       real, dimension (ie-is+1,je-js+1, size(Rad_output%tdtsw,3)) ::  &
                                                 tdtlw, tdtlw_clr,&
+                                                tdtlw_ad,tdtsw_ad, &
                                                 hsw, hswcf, pmass
 
       real, dimension (ie-is+1,je-js+1, size(Rad_output%tdtsw,3)+1) :: &
@@ -1836,6 +1848,7 @@ type(sw_output_type), dimension(:), intent(in), optional :: Sw_output
           if (do_swaerosol_forcing) then
             dfsw_ad(:,:,k) = Sw_output(indx_swaf)%dfsw(:,:,k)
             ufsw_ad(:,:,k) = Sw_output(indx_swaf)%ufsw(:,:,k)
+            tdtsw_ad(:,:,k) = Sw_output(indx_swaf)%hsw(:,:,k) / SECONDS_PER_DAY
           endif
           dfsw(:,:,k) = Sw_output(1)%dfsw(:,:,k)
           ufsw(:,:,k) = Sw_output(1)%ufsw(:,:,k)
@@ -2038,6 +2051,12 @@ type(sw_output_type), dimension(:), intent(in), optional :: Sw_output
          if (id_swup_toa_ad(ipass) > 0 ) then
            used = send_data (id_swup_toa_ad(ipass), swout_ad,    &
                             Time_diag, is, js )
+        endif
+!------- sw tendency -----------
+        if (id_tdt_sw_ad(ipass) > 0 ) then
+          used = send_data (id_tdt_sw_ad(ipass),    &
+                            tdtsw_ad,   &
+                            Time_diag, is, js, 1)
         endif
      endif
 
@@ -2641,6 +2660,7 @@ type(sw_output_type), dimension(:), intent(in), optional :: Sw_output
           lwups_ad(:,:)   = STEFAN*ts(:,:  )**4
           lwdns_ad(:,:)   = lwups_ad(:,:) -    &
                                 Lw_output(indx_lwaf)%flxnet(:,:,kmax+1)
+          tdtlw_ad(:,:,:) = Lw_output(2)%heatra(:,:,:)/ SECONDS_PER_DAY
         endif
 
         if (Rad_control%do_totcld_forcing) then
@@ -2803,10 +2823,15 @@ type(sw_output_type), dimension(:), intent(in), optional :: Sw_output
         endif
 
 !------- net lw flux surface -------
-        if ( id_lwsfc_ad(ipass) > 0 ) then
-           used = send_data (id_lwsfc_ad(ipass), lwups_ad-lwdns_ad,    &
+        if ( id_lwdnsfc_ad(ipass) > 0 ) then
+           used = send_data (id_lwdnsfc_ad(ipass), lwdns_ad,    &
                              Time_diag, is, js )
         endif
+!------- lw tendency -----------
+          if (id_tdt_lw_ad(ipass) > 0 ) then
+            used = send_data (id_tdt_lw_ad(ipass), tdtlw_ad,    &
+                              Time_diag, is, js, 1)
+          endif
      endif
 
 !----------------------------------------
@@ -2923,8 +2948,8 @@ type(sw_output_type), dimension(:), intent(in), optional :: Sw_output
          endif   
    
 !------- net lw flux surface -------
-         if ( id_lwsfc_ad(ipass) > 0 ) then
-           used = send_data (id_lwsfc_ad(ipass), lwups_ad_clr-lwdns_ad_clr,    &
+         if ( id_lwdnsfc_ad(ipass) > 0 ) then
+           used = send_data (id_lwdnsfc_ad(ipass), lwdns_ad_clr,    &
                            Time_diag, is, js )
         endif
       endif
