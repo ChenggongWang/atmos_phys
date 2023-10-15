@@ -2044,7 +2044,7 @@ real, dimension(:,:,:,:), pointer :: r, rm
                              aeroasymfac, aerosctopdep, aeroextopdep, &
                              crndlw, cmxolw, emrndlw, emmxolw, &
                              camtsw, cldsctsw, cldextsw, cldasymmsw, &
-                             Rad_output, Lw_output21(1,:), Sw_output21(1,:), Lw_diagnostics)
+                             Rad_output, Lw_output21(2,:), Sw_output21(2,:), Lw_diagnostics)
 
       endif
       call mpp_clock_end (calc_clock)
@@ -2082,7 +2082,7 @@ real, dimension(:,:,:,:), pointer :: r, rm
                              aeroasymfac, aerosctopdep, aeroextopdep, &
                              crndlw, cmxolw, emrndlw, emmxolw, &
                              camtsw, cldsctsw, cldextsw, cldasymmsw, &
-                             Rad_output, Lw_output21(2,:), Sw_output21(2,:), Lw_diagnostics)
+                             Rad_output, Lw_output21(1,:), Sw_output21(1,:), Lw_diagnostics)
       endif
       call mpp_clock_end (calc_clock)
       Lw_output(:) = Lw_output21(:,1)
